@@ -6,8 +6,10 @@ import re
 import tempfile
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import ClientError
 
 from protocol_intel.config import Settings, digest
@@ -69,8 +71,37 @@ class S3Blobs:
             region_name=settings.s3_region,
             aws_access_key_id=settings.aws_access_key_id.get_secret_value() or None,
             aws_secret_access_key=settings.aws_secret_access_key.get_secret_value() or None,
+            config=Config(
+                connect_timeout=10,
+                read_timeout=30,
+                retries={"mode": "standard", "total_max_attempts": 2},
+            ),
         )
         self.slots = asyncio.Semaphore(8)
+
+    async def check_conditional_writes(self) -> None:
+        # A disposable diagnostic key tests rejected overwrites without risking evidence.
+        key = f"diagnostics/conditional-write/{uuid4()}.txt"
+        original = b"Protocol Intelligence Monitor conditional-write check\n"
+
+        def check():
+            self.client.put_object(Bucket=self.bucket, Key=key, Body=original, IfNoneMatch="*")
+            try:
+                self.client.put_object(
+                    Bucket=self.bucket, Key=key, Body=b"overwrite must fail", IfNoneMatch="*"
+                )
+            except ClientError as exc:
+                if exc.response["ResponseMetadata"]["HTTPStatusCode"] != 412:
+                    raise
+            else:
+                raise ValueError("Archive backend did not reject a conditional overwrite")
+            response = self.client.get_object(Bucket=self.bucket, Key=key)
+            with response["Body"] as stream:
+                if stream.read() != original:
+                    raise ValueError("Archive changed existing bytes during a rejected overwrite")
+
+        async with self.slots:
+            await asyncio.to_thread(check)
 
     async def put(self, data: bytes) -> str:
         key = digest(data)

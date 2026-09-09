@@ -24,6 +24,7 @@ from protocol_intel.database import Database
 from protocol_intel.http import HTTP
 from protocol_intel.release import release_status
 from protocol_intel.safety import safe_error
+from protocol_intel.setup import check_storage, storage_identity
 from protocol_intel.telegram import Telegram, deliver_one
 
 app = typer.Typer(no_args_is_help=True, pretty_exceptions_enable=False)
@@ -117,6 +118,26 @@ def sync_config():
         try:
             await db.sync(protocols)
             show({"protocols_synced": len(protocols)})
+        finally:
+            await db.close()
+
+    run(task())
+
+
+@app.command("storage-check")
+def storage_check(verify_only: bool = False):
+    """Write and verify diagnostic evidence, or read it again after a process restart."""
+
+    async def task():
+        settings = Settings()
+        db = Database(settings.database_url.get_secret_value())
+        try:
+            async with asyncio.timeout(180):
+                show(
+                    await check_storage(
+                        db, open_blobs(settings), storage_identity(settings), verify_only
+                    )
+                )
         finally:
             await db.close()
 
