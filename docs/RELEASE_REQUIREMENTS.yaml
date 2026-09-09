@@ -3,10 +3,12 @@ requirements:
   - id: PROD-01
     title: Real Postgres and container verification
     gate: first_production
-    status: implemented_unverified
+    status: verified
     owner: Codex
     specification: Sections 28 and 35
     acceptance: All database integration tests pass against Postgres 18, migrations run twice, the container builds and validates, and the exact tested commit is recorded. Skips do not count as passes.
+    evidence:
+      - 'GitHub CI https://github.com/bobo-the-bera/protocol-intel/actions/runs/34368778816 tested commit 36de58d3e7abff11e6b6a75f2d027c22ad6f60cf: 63 passed, zero skips; Postgres 18 fixture applies migrations twice; runtime container build and validation passed.'
   - id: PROD-02
     title: GitHub history collector
     gate: first_production
