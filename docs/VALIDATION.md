@@ -1,5 +1,13 @@
 # Prepared release validation
 
+## Successful live reference baselines — 9 September 2026
+
+[First run 34411588023](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34411588023) passed on main after the decompression fix. NEAR recorded 70 BASELINE observations and HyperLend recorded 66; both reported `baseline_complete: true`. These counts include configured source kinds such as sitemaps, not exclusively documentation pages. Archive conditional-write/readback and fresh-process verification passed again. Baselines made no model calls and requested no Telegram alerts.
+
+This completes the current configured snapshots, not the complete official repository/frontend footprint required by PROD-06. The backup/restore drill in PROD-05 also remains open. The earlier failed attempt below is retained as history.
+
+The [Analysis test](ANALYSIS_TEST.md) provides a separate, explicitly requested paid preview, usage receipt, storage audit and Telegram summary/document check. Its live model and document-delivery result must be recorded after execution; mock tests are not evidence of live integration.
+
 ## Live storage verification — 9 September 2026
 
 [First run 34410049030, attempt 2](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34410049030/attempts/2) applied the production database migrations and passed both archive write/readback and readback from a fresh process. The S3-compatible backend rejected a conditional overwrite and preserved the original bytes. Probe `826bc179-c7ee-454b-9ead-abef176024aa` is recorded in the database and archive. This is verified storage connectivity and persistence, not a backup/restore drill; PROD-05 remains open.
