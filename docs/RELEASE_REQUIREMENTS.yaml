@@ -1,0 +1,107 @@
+schema_version: 1
+requirements:
+  - id: PROD-01
+    title: Real Postgres and container verification
+    gate: first_production
+    status: implemented_unverified
+    owner: Codex
+    specification: Sections 28 and 35
+    acceptance: All database integration tests pass against Postgres 18, migrations run twice, the container builds and validates, and the exact tested commit is recorded. Skips do not count as passes.
+  - id: PROD-02
+    title: GitHub history collector
+    gate: first_production
+    status: open
+    owner: Codex
+    specification: Sections 2.6, 13 and 35
+    acceptance: Verified official repository configs plus head cursors, every intervening commit and diff, pagination, force-push handling, rate-limit recovery, silent initial baselines and idempotent retry tests. An add-then-revert across two commits must retain both events.
+  - id: PROD-03
+    title: Frontend asset monitoring
+    gate: first_production
+    status: open
+    owner: Codex
+    specification: Sections 14 and 35
+    acceptance: Fetch and archive configured frontend assets and their fingerprints/bodies, including same-URL content changes. Test new/removed assets, a one-line flag change and partial fetch failure. HTML script URLs alone do not pass.
+  - id: PROD-04
+    title: Complete request budgets and oversized-job recovery
+    gate: first_production
+    status: open
+    owner: Codex
+    specification: Sections 17.4, 21.4 and 23
+    acceptance: Bound the complete model request including coverage, prior results, serialization and synthesis; retain every changed hunk; resume or explicitly replan oversized jobs without losing events or successful chunk results. Test large inputs and aggregation, not just diff slicing.
+  - id: PROD-05
+    title: Durable blob publication and storage integration
+    gate: first_production
+    status: open
+    owner: Codex; Incred supplies storage credentials
+    specification: Sections 2.1, 10, 24 and 35
+    acceptance: Local blob directory entries are durably synced before DB commit, a missing/corrupt blob cannot become successful analysis, and the selected live S3/R2 backend passes conditional-write, readback and restart tests. Record a matching database/evidence backup and restore drill.
+  - id: PROD-06
+    title: Verified source coverage and clean reference baselines
+    gate: first_production
+    status: open
+    owner: Codex
+    specification: Sections 7, 9, 12, 27 and 35
+    acceptance: Verify the official docs, API, frontend and repository footprint for both reference protocols; complete both baselines with a coverage inventory; confirm an unchanged run makes zero model calls. Snapshot inventory additions with relevant new-page context without alerting on first-fetch baselines.
+  - id: PROD-07
+    title: Scheduler and subscription reconciliation
+    gate: first_production
+    status: open
+    owner: Codex
+    specification: Sections 7, 11.2 and 35
+    acceptance: Recalculate cadence/pinning from active subscriptions, advance the due time on promotion, make discovered-page cadence configurable, preserve shared-source subscription ownership on inventory removal, and demonstrate no starvation behind a slow host. Test expiry and stale commits against Postgres.
+  - id: PROD-08
+    title: Visible failures and recoverable analysis lifecycle
+    gate: first_production
+    status: open
+    owner: Codex
+    specification: Sections 17, 23, 29 and 35
+    acceptance: Run the new dead-worker, failed-parent, manual-only, disabled-protocol and retry tests against Postgres; verify health reports and workflow exit status expose terminal failures. Demonstrate recovery without changing original input or creating duplicate reports.
+  - id: PROD-09
+    title: Telegram delivery and ambiguous-send reconciliation
+    gate: first_production
+    status: open
+    owner: Codex; Incred supplies bot and channel secrets
+    specification: Sections 19, 23, 30 and 35 plus Telegram-first amendment
+    acceptance: Verify summary plus full document in the real channel; test timeout before/after submission, a DB failure after acknowledgement, and concurrent notifiers. Bound delivery work below its stale-send interval and fence reconciliation against an active attempt. Duplicate general findings in focus output must not produce repeated alerts.
+  - id: PROD-10
+    title: Deployment and public-fetch network policy
+    gate: first_production
+    status: open
+    owner: Codex
+    specification: Sections 8, 22 and 24
+    acceptance: Resolve the DNS-validation/transport gap with a tested pinned transport or deployed outbound network policy; verify DNS, redirects and public-only destinations on the actual runtime. Confirm durable volumes, role switches and restart recovery; do not use workspace endpoint reachability as a production baseline.
+  - id: SPEC-01
+    title: Historical evidence context and full report contract
+    gate: full_specification
+    status: open
+    owner: Codex
+    specification: Sections 17.3, 18 and 32
+    acceptance: Retrieve relevant historical evidence with its provenance, clearly label prior inference, and render all required report sections with justified confidence and qualitative probability impact where relevant. The last five material reports alone do not establish this.
+  - id: SPEC-02
+    title: Daily digest and coverage-health delivery
+    gate: full_specification
+    status: open
+    owner: Codex
+    specification: Sections 20.2 and 23
+    acceptance: Produce an idempotent daily digest from stored events/reports, include failures and coverage gaps, and never reanalyze the full unchanged corpus. Verify time-window boundaries and reruns.
+  - id: SPEC-03
+    title: Protocol priorities and daily/monthly cost controls
+    gate: full_specification
+    status: open
+    owner: Codex
+    specification: Sections 17.1 and 21
+    acceptance: Implement protocol priorities, soft budget warnings and durable delayed work; expose actual usage including unsuccessful calls where available. Optional triage never narrows collection or suppresses the mandatory broad assessment without an explicit user-approved design change.
+  - id: SPEC-04
+    title: Retention and operator replay
+    gate: full_specification
+    status: open
+    owner: Codex
+    specification: Sections 29, 31 and 32
+    acceptance: Provide inspected replay/reanalysis and retention operations with provenance and dependency-safe deletion, plus tested backup restoration. Keeping every object indefinitely is not a completed retention policy.
+  - id: SCALE-01
+    title: 200-500 protocol qualification
+    gate: scale
+    status: open
+    owner: Codex
+    specification: Sections 24.3 and 25
+    acceptance: Record load/soak results for representative source counts, queue delay, host fairness, database indexes, storage I/O, request budgets and failure recovery. Document measured capacity before claiming the architecture has achieved that scale.

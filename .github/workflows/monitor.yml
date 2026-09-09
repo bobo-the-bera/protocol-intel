@@ -1,0 +1,107 @@
+name: Monitor
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Baseline first, then cycle. Analyze may use API credit; notify may post to Telegram.'
+        required: true
+        type: choice
+        default: status
+        options: [baseline, cycle, collect, analyze, notify, status]
+      protocol:
+        description: 'Protocol ID required for baseline (near or hyperlend initially)'
+        type: string
+        default: near
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-intel-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      MONITOR_TASK: ${{ inputs.task || 'cycle' }}
+      PROTOCOL_ID: ${{ inputs.protocol || 'near' }}
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BLOB_BACKEND: s3
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+      S3_REGION: ${{ vars.S3_REGION || 'auto' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_DEEP_MODEL: ${{ vars.OPENAI_DEEP_MODEL || 'gpt-5.6-sol' }}
+      OPENAI_DEEP_REASONING_EFFORT: ${{ vars.OPENAI_DEEP_REASONING_EFFORT || 'high' }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      ANALYSIS_ENABLED: ${{ vars.ANALYSIS_ENABLED || 'false' }}
+      NOTIFICATIONS_ENABLED: ${{ vars.NOTIFICATIONS_ENABLED || 'false' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.11.33'
+      - run: uv sync --frozen --no-dev
+      - name: Validate persistent runtime settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in DATABASE_URL S3_BUCKET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
+            if [ -z "${!name}" ]; then
+              echo "Missing required repository secret: $name. See docs/DEPLOYMENT.md."
+              exit 1
+            fi
+          done
+          if [ "$ANALYSIS_ENABLED" = true ] && [ -z "$OPENAI_API_KEY" ]; then
+            echo 'ANALYSIS_ENABLED requires OPENAI_API_KEY.'
+            exit 1
+          fi
+          if [ "$NOTIFICATIONS_ENABLED" = true ] && { [ -z "$TELEGRAM_BOT_TOKEN" ] || [ -z "$TELEGRAM_CHAT_ID" ]; }; then
+            echo 'NOTIFICATIONS_ENABLED requires both Telegram secrets.'
+            exit 1
+          fi
+          uv run protocol-intel validate
+          uv run protocol-intel init-db
+          uv run protocol-intel sync-config
+      - name: Run monitor task
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$MONITOR_TASK" in
+            baseline) uv run protocol-intel baseline "$PROTOCOL_ID" ;;
+            collect) uv run protocol-intel run-due --limit 2000 ;;
+            analyze) uv run protocol-intel analyze --limit 5 ;;
+            notify) uv run protocol-intel notify --limit 40 ;;
+            status) uv run protocol-intel status; uv run protocol-intel failures ;;
+            cycle)
+              collection_result=0
+              analysis_result=0
+              uv run protocol-intel run-due --limit 2000 || collection_result=$?
+              if [ "$ANALYSIS_ENABLED" = true ]; then
+                uv run protocol-intel analyze --limit 5 || analysis_result=$?
+              fi
+              if [ "$NOTIFICATIONS_ENABLED" = true ]; then
+                uv run protocol-intel notify --limit 40
+              fi
+              uv run protocol-intel status
+              if [ "$collection_result" -ne 0 ] || [ "$analysis_result" -ne 0 ]; then
+                uv run protocol-intel failures
+                exit 1
+              fi
+              ;;
+            *) exit 1 ;;
+          esac

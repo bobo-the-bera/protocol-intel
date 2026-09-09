@@ -1,0 +1,53 @@
+name: Telegram setup
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'discover finds the channel ID; check verifies permissions; test sends one labeled message'
+        required: true
+        type: choice
+        default: check
+        options: [discover, check, test]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: telegram-setup
+  cancel-in-progress: false
+
+jobs:
+  setup:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      SETUP_MODE: ${{ inputs.mode }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.11.33'
+      - run: uv sync --frozen --no-dev
+      - name: Run Telegram setup
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "$TELEGRAM_BOT_TOKEN" ]; then
+            echo 'Add the TELEGRAM_BOT_TOKEN repository Actions secret first.'
+            exit 1
+          fi
+          case "$SETUP_MODE" in
+            discover) uv run protocol-intel telegram-discover ;;
+            check) uv run protocol-intel telegram-check ;;
+            test) uv run protocol-intel telegram-test ;;
+            *) exit 1 ;;
+          esac
