@@ -1,5 +1,13 @@
 # Prepared release validation
 
+## Live storage verification — 9 September 2026
+
+[First run 34410049030, attempt 2](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34410049030/attempts/2) applied the production database migrations and passed both archive write/readback and readback from a fresh process. The S3-compatible backend rejected a conditional overwrite and preserved the original bytes. Probe `826bc179-c7ee-454b-9ead-abef176024aa` is recorded in the database and archive. This is verified storage connectivity and persistence, not a backup/restore drill; PROD-05 remains open.
+
+The same attempt failed to baseline all four starting URLs with a decompression error. The client had already decompressed the response, but the text helper passed that decoded body back through the compression decoder while looking up its charset. The correction reads charset metadata separately, retaining strict text decoding and decompressed-size limits. New regression tests reproduced the exact failure before the correction. A fresh First run from `main` is needed to verify the repaired live baselines; rerunning an older workflow run retains its old code revision.
+
+The preceding setup implementation passed [CI run 34409240781](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34409240781) on commit `570a4c032cabddaabfca83c16c3fca494d1b16b1`: **71 tests passed with zero skips**, including 19 Postgres tests, plus container build and validation.
+
 ## Published CI verification — 9 September 2026
 
 [CI run 34368778816](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34368778816) passed on commit `36de58d3e7abff11e6b6a75f2d027c22ad6f60cf`: **63 tests passed with zero skips**, including all 16 Postgres integration tests. The Postgres 18 fixture applies migrations twice. Ruff, formatting, mypy, configuration validation, and the runtime container build and validation all passed. This verifies PROD-01; nine first-production requirements remain open.

@@ -1,8 +1,101 @@
+import gzip
+import zlib
+
+import httpx
 import pytest
 
 from protocol_intel.collector import discover, fetch_page
 from protocol_intel.config import Source
 from protocol_intel.http import HTTP, FetchError
+
+
+class EncodedStream(httpx.AsyncByteStream):
+    def __init__(self, data):
+        self.data = data
+
+    async def __aiter__(self):
+        for offset in range(0, len(self.data), 7):
+            yield self.data[offset : offset + 7]
+
+
+@pytest.mark.usefixtures("public_dns")
+@pytest.mark.parametrize("coding,compress", [("gzip", gzip.compress), ("deflate", zlib.compress)])
+@pytest.mark.parametrize("charset", ["utf-8", "iso-8859-1"])
+async def test_compressed_response_is_decoded_once(settings, respx_mock, coding, compress, charset):
+    text = "<html><body>Protocol café - API changes</body></html>"
+    body = text.encode(charset)
+    url = "https://docs.example.org/guide"
+    respx_mock.get(url).mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-encoding": coding, "content-type": f"text/html; charset={charset}"},
+            stream=EncodedStream(compress(body)),
+        )
+    )
+    http = HTTP(settings)
+    try:
+        result = await fetch_page(http, Source(id="guide", url=url, prefer_markdown=False), {})
+        assert result.body == body
+        assert result.text == text
+        assert result.text == text
+    finally:
+        await http.close()
+
+
+@pytest.mark.usefixtures("public_dns")
+async def test_compressed_body_limit_applies_after_decompression(settings, respx_mock):
+    settings.max_body_bytes = 1024
+    url = "https://docs.example.org/guide"
+    respx_mock.get(url).mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "text/plain"},
+            stream=EncodedStream(gzip.compress(b"x" * 4096)),
+        )
+    )
+    http = HTTP(settings)
+    try:
+        with pytest.raises(FetchError, match="size"):
+            await http.fetch(url, {"docs.example.org"})
+    finally:
+        await http.close()
+
+
+@pytest.mark.usefixtures("public_dns")
+async def test_corrupt_compressed_stream_remains_a_failure(settings, respx_mock):
+    url = "https://docs.example.org/guide"
+    respx_mock.get(url).mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "text/plain"},
+            stream=EncodedStream(b"not a gzip stream"),
+        )
+    )
+    http = HTTP(settings)
+    try:
+        with pytest.raises(FetchError, match="transport failed"):
+            await http.fetch(url, {"docs.example.org"})
+    finally:
+        await http.close()
+
+
+@pytest.mark.usefixtures("public_dns")
+async def test_compressed_invalid_text_is_not_replaced(settings, respx_mock):
+    url = "https://docs.example.org/guide"
+    respx_mock.get(url).mock(
+        return_value=httpx.Response(
+            200,
+            headers={"content-encoding": "gzip", "content-type": "text/plain; charset=utf-8"},
+            stream=EncodedStream(gzip.compress(b"invalid UTF-8: \xff")),
+        )
+    )
+    http = HTTP(settings)
+    try:
+        result = await http.fetch(url, {"docs.example.org"})
+        with pytest.raises(UnicodeDecodeError):
+            _ = result.text
+    finally:
+        await http.close()
 
 
 @pytest.mark.usefixtures("public_dns")

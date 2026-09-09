@@ -30,7 +30,13 @@ class Response:
     @property
     def text(self) -> str:
         # Invalid text is a coverage failure, not a lossy replacement-character snapshot.
-        encoding = httpx.Response(200, headers=self.headers, content=self.body).encoding or "utf-8"
+        # aiter_bytes already decompressed the body; inspect only charset metadata here.
+        encoding = (
+            httpx.Response(
+                200, headers={"content-type": self.headers.get("content-type", "")}
+            ).encoding
+            or "utf-8"
+        )
         return self.body.decode(encoding, errors="strict")
 
 
