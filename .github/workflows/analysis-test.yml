@@ -1,0 +1,66 @@
+name: Analysis test
+
+on:
+  workflow_dispatch:
+    inputs:
+      protocol:
+        description: 'One paid sampled baseline review, Telegram report, token usage and storage costs'
+        type: choice
+        options:
+          - near
+          - hyperlend
+        default: near
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-intel-monitor
+  cancel-in-progress: false
+
+jobs:
+  preview:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BLOB_BACKEND: s3
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+      S3_REGION: ${{ vars.S3_REGION || 'auto' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_DEEP_MODEL: ${{ vars.OPENAI_DEEP_MODEL || 'gpt-5.6-sol' }}
+      OPENAI_DEEP_REASONING_EFFORT: ${{ vars.OPENAI_DEEP_REASONING_EFFORT || 'high' }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      COLLECTION_ENABLED: 'false'
+      ANALYSIS_ENABLED: 'false'
+      NOTIFICATIONS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.11.33'
+      - run: uv sync --frozen --no-dev
+      - run: uv run protocol-intel init-db
+      - name: Review archived snapshots and deliver test report
+        env:
+          PROTOCOL_ID: ${{ inputs.protocol }}
+        run: uv run protocol-intel analysis-preview "$PROTOCOL_ID" --run-id "$GITHUB_RUN_ID" --send --output test-report.md
+      - name: Publish report summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f test-report.md ]; then
+            cat test-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'No completed test report. Inspect the review step for errors and any recorded token usage. A rerun of this same workflow run reuses its test ID; a new Run workflow requests a new paid test.' >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -7,6 +7,7 @@ from sqlalchemy import text
 
 from protocol_intel.blobs import BlobStore
 from protocol_intel.config import Settings
+from protocol_intel.costs import cost_text
 from protocol_intel.database import Database
 
 
@@ -133,6 +134,20 @@ class Telegram:
 def summary_text(row: dict) -> str:
     result = row["result"]
     lines = [f"PROTOCOL INTELLIGENCE — {row['protocol_id']}", f"Report {row['report_id']}", ""]
+    if preview := result.get("_preview"):
+        usage = preview["usage"]
+        lines = [
+            f"TEST — BASELINE REVIEW — {row['protocol_id']}",
+            "Sampled existing snapshots; not a detected change.",
+            f"Report {row['report_id']}",
+            cost_text(preview["cost"]),
+            f"Tokens: {usage.get('input_tokens', 'unknown')} input / {usage.get('output_tokens', 'unknown')} output (includes reasoning).",
+            f"Sample: {preview['sampled_pages']}/{preview['available_pages']} archived pages.",
+            f"Application archive: {preview['resources']['archive_bytes'] / 2**20:.3f} MiB; storage breakdown and cost scenarios in attachment.",
+            "",
+        ]
+        if not result["findings"]:
+            lines.extend([result["nonmaterial_summary"], ""])
     for finding in result["findings"]:
         if finding["importance"] == "LOW":
             continue
@@ -153,12 +168,15 @@ def summary_text(row: dict) -> str:
     )
 
 
-async def deliver_one(db: Database, blobs: BlobStore, telegram: Telegram) -> bool:
+async def deliver_one(
+    db: Database, blobs: BlobStore, telegram: Telegram, report_id: str | None = None
+) -> bool:
     async with db.engine.begin() as conn:
         await conn.execute(
             text(
-                "UPDATE outbox SET status='UNKNOWN',last_error='Worker stopped during submission; inspect channel before resolving' WHERE status='SENDING' AND sending_at<now()-interval '5 minutes'"
-            )
+                "UPDATE outbox SET status='UNKNOWN',last_error='Worker stopped during submission; inspect channel before resolving' WHERE status='SENDING' AND sending_at<now()-interval '5 minutes' AND (CAST(:report AS text) IS NULL OR report_id=:report)"
+            ),
+            {"report": report_id},
         )
         found = (
             (
@@ -166,10 +184,12 @@ async def deliver_one(db: Database, blobs: BlobStore, telegram: Telegram) -> boo
                     text("""
           SELECT o.*,r.result,r.blob_hash,r.protocol_id FROM outbox o JOIN reports r ON r.id=o.report_id
           WHERE o.status='PENDING' AND o.next_attempt_at<=now()
+            AND (CAST(:report AS text) IS NULL OR o.report_id=:report)
             AND (o.part='summary' OR EXISTS(SELECT 1 FROM outbox s WHERE s.report_id=o.report_id AND s.destination=o.destination AND s.part='summary' AND s.status='SENT'))
           ORDER BY o.next_attempt_at,CASE WHEN o.part='summary' THEN 0 ELSE 1 END,o.id
           FOR UPDATE OF o SKIP LOCKED LIMIT 1
-        """)
+        """),
+                    {"report": report_id},
                 )
             )
             .mappings()
@@ -210,7 +230,7 @@ async def deliver_one(db: Database, blobs: BlobStore, telegram: Telegram) -> boo
                 "sendDocument",
                 {
                     "chat_id": checked["channel_id"],
-                    "caption": f"Full evidence — {row['protocol_id']} — {row['report_id']}",
+                    "caption": f"{'TEST baseline review' if row['result'].get('_preview') else 'Full evidence'} — {row['protocol_id']} — {row['report_id']}",
                 },
                 files={
                     "document": (

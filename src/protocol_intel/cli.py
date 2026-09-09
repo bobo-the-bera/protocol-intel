@@ -19,9 +19,10 @@ from protocol_intel.analysis import (
 )
 from protocol_intel.blobs import open_blobs
 from protocol_intel.collector import run_due
-from protocol_intel.config import Settings, load_protocols
+from protocol_intel.config import Settings, digest, load_protocols
 from protocol_intel.database import Database
 from protocol_intel.http import HTTP
+from protocol_intel.preview import generate_preview
 from protocol_intel.release import release_status
 from protocol_intel.safety import safe_error
 from protocol_intel.setup import check_storage, storage_identity
@@ -139,6 +140,63 @@ def storage_check(verify_only: bool = False):
                     )
                 )
         finally:
+            await db.close()
+
+    run(task())
+
+
+@app.command("analysis-preview")
+def analysis_preview(
+    protocol: str,
+    run_id: str = typer.Option(..., help="Reuse the same ID to resume without another paid call"),
+    send: bool = False,
+    output: Path | None = None,
+):
+    """Make one paid sampled baseline review; optionally send its labeled report to Telegram."""
+
+    async def task():
+        settings, _ = configuration(protocol)
+        db = Database(settings.database_url.get_secret_value())
+        analyzer = None
+        telegram = None
+        try:
+            blobs = open_blobs(settings)
+            if send:
+                telegram = Telegram(settings)
+                await telegram.check()
+            analyzer = OpenAIAnalyzer(settings)
+            report = await generate_preview(db, blobs, analyzer, settings, protocol, run_id)
+            show({"report_id": report["id"], **report["result"]["_preview"]})
+            if output:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_bytes(await blobs.get(report["blob_hash"]))
+            if telegram:
+                for part in ("summary", "document"):
+                    await db.execute(
+                        "INSERT INTO outbox(id,report_id,destination,part) VALUES(:id,:report,:destination,:part) ON CONFLICT DO NOTHING",
+                        id=digest(f"{report['id']}:{telegram.destination}:{part}".encode()),
+                        report=report["id"],
+                        destination=telegram.destination,
+                        part=part,
+                    )
+                for _ in range(2):
+                    if not await deliver_one(db, blobs, telegram, report_id=report["id"]):
+                        break
+                states = await db.rows(
+                    "SELECT id,part,status,last_error FROM outbox WHERE report_id=:report AND destination=:destination",
+                    report=report["id"],
+                    destination=telegram.destination,
+                )
+                show({"telegram": states})
+                if len(states) != 2 or any(row["status"] != "SENT" for row in states):
+                    raise ValueError(
+                        "Test report saved; Telegram delivery incomplete. Inspect delivery status before retrying with the same run ID"
+                    )
+        finally:
+            if analyzer:
+                await analyzer.close()
+            if telegram:
+                await telegram.close()
             await db.close()
 
     run(task())

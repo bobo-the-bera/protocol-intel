@@ -39,6 +39,7 @@ requirements:
     acceptance: Local blob directory entries are durably synced before DB commit, a missing/corrupt blob cannot become successful analysis, and the selected live S3/R2 backend passes conditional-write, readback and restart tests. Record a matching database/evidence backup and restore drill.
     evidence:
       - 'Partial verification: First run 34410049030 attempt 2 passed real database migration and archive conditional-write/readback checks, including persisted readback from a fresh process. Local directory durability and backup/restore acceptance remain open.'
+      - 'First run 34411588023 passed conditional-write/readback and fresh-process readback again after the collector fix; backup/restore acceptance remains open.'
   - id: PROD-06
     title: Verified source coverage and clean reference baselines
     gate: first_production
@@ -46,6 +47,8 @@ requirements:
     owner: Codex
     specification: Sections 7, 9, 12, 27 and 35
     acceptance: Verify the official docs, API, frontend and repository footprint for both reference protocols; complete both baselines with a coverage inventory; confirm an unchanged run makes zero model calls. Snapshot inventory additions with relevant new-page context without alerting on first-fetch baselines.
+    evidence:
+      - 'Partial verification: First run https://github.com/bobo-the-bera/protocol-intel/actions/runs/34411588023 completed the configured NEAR and HyperLend baselines (70 and 66 BASELINE observations; both baseline_complete true). Full repository/frontend coverage and the unchanged-run acceptance remain open.'
   - id: PROD-07
     title: Scheduler and subscription reconciliation
     gate: first_production
