@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: protocol_intel
+          POSTGRES_PASSWORD: ci_test_password
+          POSTGRES_DB: protocol_intel_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U protocol_intel -d protocol_intel_test"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://protocol_intel:ci_test_password@localhost:5432/protocol_intel_test
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.11.33'
+      - run: uv sync --frozen
+      - run: uv run ruff check src migrations tests
+      - run: uv run ruff format --check src migrations tests
+      - run: uv run mypy
+      - run: uv run pytest -q
+      - run: uv run protocol-intel validate
+      - name: Build and validate runtime image
+        run: |
+          docker build -t protocol-intel:ci .
+          docker run --rm protocol-intel:ci validate

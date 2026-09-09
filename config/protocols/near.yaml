@@ -1,0 +1,24 @@
+schema_version: 1
+id: near
+name: NEAR
+profile: >-
+  NEAR is a blockchain ecosystem with developer infrastructure, cross-chain
+  integrations and NEAR Intents. Assess consequential and unexpected developments
+  across its configured public technical surfaces without a required product thesis.
+sources:
+  - id: intents-docs
+    kind: sitemap
+    url: https://docs.near-intents.org/sitemap.xml
+    interval_seconds: 21600
+    max_pages: 2000
+    include_prefixes:
+      - https://docs.near-intents.org/
+    ignore_patterns:
+      - 'Last updated \d+ (minute|hour|day|week|month)s? ago'
+  - id: near-home
+    kind: page
+    url: https://near.com/
+    interval_seconds: 3600
+    pinned: true
+    allowed_hosts:
+      - www.near.com

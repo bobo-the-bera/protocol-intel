@@ -1,0 +1,24 @@
+schema_version: 1
+id: hyperlend
+name: HyperLend
+profile: >-
+  HyperLend is a lending protocol in the Hyperliquid ecosystem. Assess consequential
+  changes to products, integrations, collateral, permissions, fees, deployments,
+  risk and other unexpected developments across the configured public surfaces.
+sources:
+  - id: hyperlend-docs
+    kind: sitemap
+    url: https://docs.hyperlend.finance/sitemap.xml
+    interval_seconds: 21600
+    max_pages: 1000
+    include_prefixes:
+      - https://docs.hyperlend.finance/
+    ignore_patterns:
+      - 'Last updated \d+ (minute|hour|day|week|month)s? ago'
+  - id: hyperlend-home
+    kind: page
+    url: https://hyperlend.finance/
+    interval_seconds: 3600
+    pinned: true
+    allowed_hosts:
+      - www.hyperlend.finance

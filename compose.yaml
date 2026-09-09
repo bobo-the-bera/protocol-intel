@@ -1,0 +1,38 @@
+x-app: &app
+  build: .
+  env_file: .env
+  environment:
+    DATABASE_URL: postgresql+psycopg://protocol_intel:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/protocol_intel
+  volumes:
+    - evidence:/app/data
+  depends_on:
+    db:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: protocol_intel
+      POSTGRES_DB: protocol_intel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U protocol_intel -d protocol_intel"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  migrate:
+    <<: *app
+    command: ["init-db"]
+    profiles: ["tools"]
+  worker:
+    <<: *app
+    restart: unless-stopped
+    command: ["worker"]
+
+volumes:
+  postgres:
+  evidence:
