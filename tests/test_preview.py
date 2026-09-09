@@ -102,7 +102,7 @@ async def baseline(db, blobs, protocol):
     await db.sync([protocol])
     state = (await db.claim(1))[0]
     key = await blobs.put(b"Existing protocol documentation")
-    assert await db.finish(state, key, key, {}) == "BASELINE"
+    assert await db.finish(state, key, key, {"url": state["spec"]["url"]}) == "BASELINE"
     return key
 
 
