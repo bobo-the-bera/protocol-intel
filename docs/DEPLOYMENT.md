@@ -136,6 +136,12 @@ Open **Settings → Secrets and variables → Actions → Variables** and set, a
 
 ### Establish the baseline
 
+For initial setup, use the [First run workflow](https://github.com/bobo-the-bera/protocol-intel/actions/workflows/first-run.yml). Select `main`, leave the baseline checkbox enabled, and run it. It migrates the database, verifies S3/R2 conditional creation and exact byte readback, commits a diagnostic pointer, verifies it in a separate process, then baselines both starter protocols. Uncheck the baseline option to test storage alone. It has no OpenAI or Telegram credentials and makes no model calls or channel posts.
+
+Successful diagnostic runs leave small objects under `diagnostics/conditional-write/` and `sha256/`, with a matching `storage_probes` database record. These are setup evidence, not protocol changes. This checks connectivity and persistence across processes; it does not establish backup restoration, full source coverage or production acceptance. A failed source keeps the run red while preserving successful snapshots; rerunning resumes missing baselines.
+
+The per-protocol Monitor workflow remains available:
+
 1. Open <https://github.com/bobo-the-bera/protocol-intel/actions/workflows/monitor.yml>.
 2. Click **Run workflow**, branch `main`, task **baseline**, protocol **near**.
 3. Inspect the run for `baseline_complete: true`. If false, inspect its listed failures and rerun after the retry delay. Successful pages are not rebaselined.
