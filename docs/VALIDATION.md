@@ -4,7 +4,7 @@
 
 [CI run 34368778816](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34368778816) passed on commit `36de58d3e7abff11e6b6a75f2d027c22ad6f60cf`: **63 tests passed with zero skips**, including all 16 Postgres integration tests. The Postgres 18 fixture applies migrations twice. Ruff, formatting, mypy, configuration validation, and the runtime container build and validation all passed. This verifies PROD-01; nine first-production requirements remain open.
 
-[PR #1](https://github.com/bobo-the-bera/protocol-intel/pull/1) was merged. The Telegram setup workflow is now available on `main`. Live Telegram delivery still requires the manual setup test; passing mocked tests does not establish live delivery or close PROD-09.
+[PR #1](https://github.com/bobo-the-bera/protocol-intel/pull/1) was merged. The Telegram setup workflow is now available on `main`. The owner confirmed successful delivery of the manual Telegram setup test. This verifies the configured bot can post to the intended channel. Full report/document delivery, concurrency and ambiguous-send recovery remain unverified, so PROD-09 stays open.
 
 The snapshots below describe earlier checks and blockers, not the current publication state.
 
