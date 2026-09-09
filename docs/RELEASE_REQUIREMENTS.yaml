@@ -37,6 +37,8 @@ requirements:
     owner: Codex; Incred supplies storage credentials
     specification: Sections 2.1, 10, 24 and 35
     acceptance: Local blob directory entries are durably synced before DB commit, a missing/corrupt blob cannot become successful analysis, and the selected live S3/R2 backend passes conditional-write, readback and restart tests. Record a matching database/evidence backup and restore drill.
+    evidence:
+      - 'Partial verification: First run 34410049030 attempt 2 passed real database migration and archive conditional-write/readback checks, including persisted readback from a fresh process. Local directory durability and backup/restore acceptance remain open.'
   - id: PROD-06
     title: Verified source coverage and clean reference baselines
     gate: first_production
