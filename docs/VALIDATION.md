@@ -1,5 +1,13 @@
 # Prepared release validation
 
+## Scheduled pilot and digest — 10 September 2026
+
+[Recovery run 34471081681](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34471081681) succeeded: outbox records for `baseline-test-34414521438` show both summary and document SENT. Recovery reused the original stored model response with no new API call. This verifies the live report/document path; broader concurrency and reconciliation acceptance remains tracked under PROD-09.
+
+The owner then authorized scheduled monitoring and daily digests. The implementation adds 15-minute due-source cycles, HIGH/CRITICAL alerts, and a previous-UTC-day digest due at 08:00 UTC with zero digest inference. Stored cursor, outbox and cycle records support catch-up, retry and failure visibility. Unit/Postgres tests cover day boundaries, late completion, exact focus deduplication, baseline exclusion, upload failure across midnight, missing report evidence, concurrent workers, definite/ambiguous delivery and continued digest work after collection failure. CI and the first live scheduled cycle/digest require recording after execution; no release criterion is waived by this pilot authorization.
+
+The paragraphs below retain earlier deployment snapshots. References there to a missing digest or disabled schedule describe the state before this change.
+
 ## First live model response — 9 September 2026
 
 [Analysis test 34414521438](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34414521438) received a completed GPT-5.6 Sol response: 7,852 input tokens (7,849 cache-write tokens, zero cache hits), 4,469 output tokens including 2,509 reasoning tokens. At the recorded standard rates its token estimate is $0.128637, not a verified invoice. Raw response and usage were saved before validation.

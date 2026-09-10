@@ -122,6 +122,8 @@ class Settings(BaseSettings):
     collection_enabled: bool = False
     analysis_enabled: bool = False
     notifications_enabled: bool = False
+    daily_digest_enabled: bool = False
+    daily_digest_hour_utc: int = Field(default=8, ge=0, le=23)
     http_concurrency: int = Field(default=20, ge=1, le=100)
     per_host_concurrency: int = Field(default=2, ge=1, le=8)
     per_host_spacing_seconds: float = Field(default=0.5, ge=0.1)

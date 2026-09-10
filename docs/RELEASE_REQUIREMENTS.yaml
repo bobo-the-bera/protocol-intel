@@ -91,6 +91,8 @@ requirements:
     owner: Codex
     specification: Sections 20.2 and 23
     acceptance: Produce an idempotent daily digest from stored events/reports, include failures and coverage gaps, and never reanalyze the full unchanged corpus. Verify time-window boundaries and reruns.
+    evidence:
+      - 'Implemented 10 September: persistent UTC cursor and deterministic stored-report digest, coverage/failure/usage sections, atomic outbox publication, late-analysis inclusion and retry/catch-up tests in tests/test_digests.py. Exact CI and live pilot results must be recorded after execution; status remains open until verified.'
   - id: SPEC-03
     title: Protocol priorities and daily/monthly cost controls
     gate: full_specification

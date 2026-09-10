@@ -1,5 +1,6 @@
 """Outbound Telegram delivery distinguishes definite failure from uncertain sends."""
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -133,6 +134,8 @@ class Telegram:
 
 def summary_text(row: dict) -> str:
     result = row["result"]
+    if daily := result.get("_digest"):
+        return daily["summary"].encode("utf-16-le")[:7600].decode("utf-16-le", errors="ignore")
     lines = [f"PROTOCOL INTELLIGENCE — {row['protocol_id']}", f"Report {row['report_id']}", ""]
     if preview := result.get("_preview"):
         usage = preview["usage"]
@@ -174,6 +177,14 @@ def summary_text(row: dict) -> str:
 
 
 async def deliver_one(
+    db: Database, blobs: BlobStore, telegram: Telegram, report_id: str | None = None
+) -> bool:
+    # Bound an active attempt below stale-send reconciliation's five-minute threshold.
+    async with asyncio.timeout(240):
+        return await _deliver_one(db, blobs, telegram, report_id)
+
+
+async def _deliver_one(
     db: Database, blobs: BlobStore, telegram: Telegram, report_id: str | None = None
 ) -> bool:
     async with db.engine.begin() as conn:
@@ -235,11 +246,13 @@ async def deliver_one(
                 "sendDocument",
                 {
                     "chat_id": checked["channel_id"],
-                    "caption": f"{'TEST baseline review' if row['result'].get('_preview') else 'Full evidence'} — {row['protocol_id']} — {row['report_id']}",
+                    "caption": f"Daily digest — {row['result']['_digest']['day']} UTC"
+                    if row["result"].get("_digest")
+                    else f"{'TEST baseline review' if row['result'].get('_preview') else 'Full evidence'} — {row['protocol_id']} — {row['report_id']}",
                 },
                 files={
                     "document": (
-                        f"{row['protocol_id']}-{row['report_id']}.md",
+                        f"{row['protocol_id'] or 'all'}-{row['report_id']}.md",
                         report,
                         "text/markdown",
                     )

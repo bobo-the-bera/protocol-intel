@@ -1,10 +1,10 @@
 # First production run
 
-**Current status: blocked pending the [prepublication review's release requirements](PREPUBLICATION_REVIEW.md).** These instructions describe configuration and validation. Do not activate continuous production monitoring until `uv run protocol-intel release-check` passes with actual verification evidence. Manual baselines and connection checks remain available for validation.
+**Current status: the owner authorized the scheduled NEAR/HyperLend docs pilot on 10 September 2026 after verifying baselines, storage and Telegram report delivery.** The Monitor workflow now enables this scoped pilot by default. This authorization does not close the [full production requirements](RELEASE_REQUIREMENTS.yaml): missing repository/asset collectors, backup restoration and other acceptance work remain explicit follow-up work. Read [SCHEDULE_AND_DIGEST.md](SCHEDULE_AND_DIGEST.md) for timing and controls.
 
-The repository supplies two runtime options. Use **Docker on a persistent host** for continuous polling. Use **GitHub Actions with external Postgres and S3/R2** for a small hourly pilot without an always-on application server. Do not run both against different state stores if you expect one alert history.
+The repository supplies two runtime options. Use **Docker on a persistent host** for continuous polling. Use **GitHub Actions with external Postgres and S3/R2** for a small scheduled pilot without an always-on application server. Do not run both against different state stores if you expect one alert history.
 
-The source of truth is Postgres plus the evidence store. Git, workflow artifacts, and Actions caches are not runtime state. No real baseline, model call, or channel notification is performed just by merging the code.
+The source of truth is Postgres plus the evidence store. Git, workflow artifacts, and Actions caches are not runtime state. Merging an enabled Monitor workflow changes subsequent scheduled runs; those cycles may collect, analyze real changes, and post to Telegram using the configured credentials.
 
 ## Option A: persistent Docker host
 
@@ -96,7 +96,7 @@ Before upgrades, take a Postgres backup and a matching evidence backup; verify a
 
 ## Option B: GitHub Actions pilot
 
-This route uses the supplied **Monitor** workflow. It runs from `main`; manual jobs and the hourly schedule share a concurrency group. It requires externally persistent Postgres and an S3-compatible bucket because each Actions runner is temporary.
+This route uses the supplied **Monitor** workflow. It runs from `main`; manual jobs and the 15-minute schedule share a concurrency group. It requires externally persistent Postgres and an S3-compatible bucket because each Actions runner is temporary.
 
 ### Create persistent storage
 
@@ -134,9 +134,12 @@ Open **Settings → Secrets and variables → Actions → Variables** and set, a
 | `OPENAI_SCREEN_REASONING_EFFORT` | `low` | Screening effort |
 | `ANALYSIS_AUDIT_PERCENT` | `2` | Deterministic percentage of routine clusters sent for deep audit |
 | `TELEGRAM_ALERT_MIN_IMPORTANCE` | `HIGH` | Immediate alert threshold; MEDIUM findings remain archived |
-| `ANALYSIS_ENABLED` | `false` | Allow model analysis during a cycle |
-| `NOTIFICATIONS_ENABLED` | `false` | Allow actual report delivery |
-| `MONITOR_ENABLED` | `false` | Allow scheduled hourly cycles |
+| `ANALYSIS_ENABLED` | `true` | Allow model analysis during a cycle |
+| `NOTIFICATIONS_ENABLED` | `true` | Allow actual report delivery |
+| `MONITOR_ENABLED` | `true` when unset | Allow scheduled 15-minute cycles; set `false` to pause |
+| `COLLECTION_ENABLED` | `true` | Check due sources during a cycle |
+| `DAILY_DIGEST_ENABLED` | `true` | Queue one digest per UTC day |
+| `DAILY_DIGEST_HOUR_UTC` | `8` | Hour after which the prior day's digest is due |
 
 ### Establish the baseline
 
@@ -154,20 +157,17 @@ The per-protocol Monitor workflow remains available:
 
 No OpenAI calls or Telegram posts are made by `baseline`. Limits are explicit; inventories that exceed their configured limits fail instead of silently losing URLs.
 
-### Enable the pilot
+### Operate the authorized pilot
 
-1. Complete the Telegram **check** and **test** workflow from [TELEGRAM.md](TELEGRAM.md).
-2. Set `ANALYSIS_ENABLED=true` and `NOTIFICATIONS_ENABLED=true` in repository Variables.
-3. Run Monitor task **cycle** manually and inspect the result. An unchanged source or baseline should produce no alert.
-4. Finally set `MONITOR_ENABLED=true` to permit hourly runs.
+The current eight secrets and verified baselines are reused. Scheduled cycles are enabled when `MONITOR_ENABLED` is unset or `true`; explicit `false` overrides are honored. Collection, analysis, notifications and daily digests default on in Actions. Local `.env` role defaults remain off.
 
-Only enable the schedule after the **Release readiness** workflow passes with recorded verification evidence. The prepared implementation currently fails that gate because required work is unfinished.
+Open **Actions → Monitor → Run workflow**, branch **main**, task **cycle** to check immediately. No protocol selection is needed for a cycle: it processes all enabled protocols. Review stage results and the Current monitor health summary. Set `MONITOR_ENABLED=false` in repository Variables to pause future scheduled cycles; it does not cancel a run already in progress.
 
-The scheduled job is configured for minute 17 of each hour. GitHub schedules can be delayed or skipped, and inactive public repositories may have schedules disabled by GitHub. With hourly collection plus a ten-minute cluster window, an alert may need the following run to become eligible; this is not a minute-level service. Use the daemon for more timely monitoring.
+Runs are scheduled at minutes 7, 22, 37 and 52 each hour. A source is fetched only when its own adaptive cadence is due. The ten-minute clustering delay normally makes a newly observed change eligible on the following scheduler cycle. GitHub schedules may be delayed or skipped, so these are intended trigger times, not an alert-latency guarantee. A continuously running worker is the path to tighter timing.
 
-Manual tasks: `collect` checks due sources; `analyze` explicitly requests model work regardless of the cycle analysis flag; `notify` requires the notification flag; `status` displays health. Do not use manual `analyze` unless you intend to incur API usage. Analysis jobs retain failures after three attempts, and unknown Telegram outcomes require explicit reconciliation.
+The daily digest covers the previous UTC calendar day and becomes due at 08:00 UTC. It is queued on the next actual cycle, normally the 08:07 trigger, and costs no new model call. A durable cursor catches up one missed day per cycle, beginning with the day before pilot initialization. See [digest semantics and recovery](SCHEDULE_AND_DIGEST.md).
 
-Each cycle continues analysis/delivery for successfully archived evidence even if an unrelated collection fails, but the workflow still ends red to expose degraded coverage. Use `status` and `failures` to diagnose it.
+Manual tasks: `collect` checks due sources; `analyze` explicitly requests model work; `digest` queues the next due daily report without calling AI or sending; `notify` delivers queued reports when notifications are enabled; `status` displays health. A normal `cycle` performs enabled stages independently, so collection failure does not suppress digest creation or queued delivery. Its recorded outcome and workflow exit expose failures. Unknown Telegram submissions require channel inspection before explicit reconciliation.
 
 ## Evidence and recovery
 
