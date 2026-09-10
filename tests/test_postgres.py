@@ -154,7 +154,9 @@ async def test_concurrent_queue_and_claim_have_single_owner(db, blobs, protocol,
 
 
 async def test_focus_cannot_suppress_general_report(db, blobs, protocol, source, settings):
-    protocol.analysis = Analysis(focus=["Only a narrowly defined old objective"])
+    protocol.analysis = Analysis(
+        mode="always_deep", focus=["Only a narrowly defined old objective"]
+    )
     await db.sync([protocol])
     await observe(db, blobs, source, "A")
     await observe(db, blobs, source, "B")
@@ -298,7 +300,7 @@ async def test_manual_protocol_requires_explicit_selection_and_disabled_jobs_wai
 async def test_failed_parent_blocks_focus_and_explicit_retry_recovers_it(
     db, blobs, protocol, source, settings
 ):
-    protocol.analysis = Analysis(focus=["Optional question"])
+    protocol.analysis = Analysis(mode="always_deep", focus=["Optional question"])
     await db.sync([protocol])
     await observe(db, blobs, source, "A")
     await observe(db, blobs, source, "B")
@@ -331,7 +333,7 @@ async def test_analysis_archives_complete_request_contract(db, blobs, protocol, 
     assert request["input"][0]["content"] == job["payload"]["system_prompt"]
     assert request["response_schema"] == Assessment.model_json_schema()
     assert request["model"] == settings.openai_deep_model
-    assert request["max_output_tokens"] == 16000
+    assert request["max_output_tokens"] == settings.deep_max_output_tokens
 
 
 async def test_blob_read_failure_before_telegram_submission_is_retryable(

@@ -259,3 +259,31 @@ async def test_screen_must_account_for_every_supplied_event():
     raw["output"][0]["content"][0]["text"] = canonical(result)
     with pytest.raises(ValueError, match="every event"):
         parse_response(raw, contract, True)
+
+
+@pytest.mark.postgres
+async def test_tiered_focus_waits_for_general_and_cannot_enter_its_input(
+    db, blobs, protocol, settings
+):
+    job = await job_with_change(db, blobs, protocol, settings)
+    focused_payload = {**job["payload"], "kind": "focus", "focus": ["Old product objective"]}
+    await db.execute(
+        "INSERT INTO jobs(id,protocol_id,kind,parent_id,payload) VALUES('focus-test',:protocol,'focus',:parent,CAST(:payload AS jsonb))",
+        protocol=protocol.id,
+        parent=job["id"],
+        payload=canonical(focused_payload),
+    )
+    assert await claim_job(db) is None
+    api = FakeAPI()
+    await process_job(db, blobs, api, job, settings)
+    original = (await db.rows("SELECT result FROM reports WHERE id=:id", id=job["id"]))[0]["result"]
+    focus = await claim_job(db)
+    assert focus["kind"] == "focus"
+    await process_job(db, blobs, api, focus, settings)
+    assert api.models == ["gpt-5.6-luna", "gpt-5.6-sol"]
+    requests = api.client.responses.create.call_args_list
+    assert "Old product objective" not in canonical(requests[0].kwargs)
+    assert "Old product objective" in canonical(requests[1].kwargs)
+    assert (await db.rows("SELECT result FROM reports WHERE id=:id", id=job["id"]))[0][
+        "result"
+    ] == original
