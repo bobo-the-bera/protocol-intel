@@ -75,7 +75,7 @@ class Source(Strict):
 
 
 class Analysis(Strict):
-    mode: Literal["always_deep", "manual_only"] = "always_deep"
+    mode: Literal["tiered", "always_deep", "manual_only"] = "tiered"
     focus: list[str] = Field(default_factory=list)
 
 
@@ -109,9 +109,16 @@ class Settings(BaseSettings):
     aws_secret_access_key: SecretStr = SecretStr("")
     openai_api_key: SecretStr = SecretStr("")
     openai_deep_model: str = "gpt-5.6-sol"
-    openai_deep_reasoning_effort: str = "high"
+    openai_deep_reasoning_effort: str = "medium"
+    openai_screen_model: str = "gpt-5.6-luna"
+    openai_screen_reasoning_effort: str = "low"
+    screen_max_output_tokens: int = Field(default=2000, ge=500, le=8000)
+    deep_max_output_tokens: int = Field(default=6000, ge=1000, le=16000)
+    analysis_request_max_bytes: int = Field(default=48000, ge=16000, le=200000)
+    analysis_audit_percent: int = Field(default=2, ge=0, le=100)
     telegram_bot_token: SecretStr = SecretStr("")
     telegram_chat_id: str = ""
+    telegram_alert_min_importance: Literal["MEDIUM", "HIGH", "CRITICAL"] = "HIGH"
     collection_enabled: bool = False
     analysis_enabled: bool = False
     notifications_enabled: bool = False

@@ -6,7 +6,7 @@ from alembic import command
 from alembic.config import Config
 
 from protocol_intel.blobs import LocalBlobs
-from protocol_intel.config import Protocol, Settings, Source
+from protocol_intel.config import Analysis, Protocol, Settings, Source
 from protocol_intel.database import Database
 
 
@@ -28,7 +28,14 @@ def source():
 
 @pytest.fixture
 def protocol(source):
-    return Protocol(id="test", name="Test protocol", profile="A public protocol.", sources=[source])
+    # Legacy integration cases explicitly exercise the retained always-deep path.
+    return Protocol(
+        id="test",
+        name="Test protocol",
+        profile="A public protocol.",
+        sources=[source],
+        analysis=Analysis(mode="always_deep"),
+    )
 
 
 @pytest.fixture

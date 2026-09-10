@@ -14,9 +14,13 @@ MODEL_PRICE_URL = "https://developers.openai.com/api/docs/models/gpt-5.6-sol"
 
 def model_cost(usage: dict) -> dict:
     model = usage.get("returned_model", "")
-    if (
-        model not in {"gpt-5.6-sol", "gpt-5.6"} and not model.startswith("gpt-5.6-sol-20")
-    ) or date.today() > date(2026, 11, 21):
+    rates = {"gpt-5.6-sol": (4.0, 20.0), "gpt-5.6-luna": (0.2, 1.2), "gpt-5.6-terra": (2.0, 12.0)}
+    base_model = (
+        "gpt-5.6-sol"
+        if model == "gpt-5.6"
+        else next((name for name in rates if model == name or model.startswith(name + "-20")), "")
+    )
+    if base_model not in rates or date.today() > date(2026, 11, 21):
         return {"available": False, "reason": "Model price needs verification", "usage": usage}
     if "input_tokens" not in usage or "output_tokens" not in usage:
         return {"available": False, "reason": "Provider did not return token usage", "usage": usage}
@@ -24,16 +28,26 @@ def model_cost(usage: dict) -> dict:
     cached = int((usage.get("input_tokens_details") or {}).get("cached_tokens", 0))
     if not 0 <= cached <= inputs or outputs < 0:
         raise ValueError("Provider returned inconsistent token usage")
-    input_rate, output_rate = (8, 30) if inputs > 272000 else (4, 20)
+    input_rate, output_rate = rates[base_model]
+    if inputs > 272000:
+        input_rate, output_rate = input_rate * 2, output_rate * 1.5
     base = (
         (inputs - cached) * input_rate + cached * input_rate * 0.1 + outputs * output_rate
     ) / 1e6
+    writes = (usage.get("input_tokens_details") or {}).get("cache_write_tokens")
+    high = base + (inputs - cached) * input_rate * 0.25 / 1e6
+    if writes is not None:
+        if not 0 <= int(writes) <= inputs - cached:
+            raise ValueError("Provider returned inconsistent cache-write usage")
+        # A returned cache-write count removes the uncertainty in the token-rate calculation.
+        base += int(writes) * input_rate * 0.25 / 1e6
+        high = base
     return {
         "available": True,
         "usd_low": round(base, 6),
-        "usd_high": round(base + (inputs - cached) * input_rate * 0.25 / 1e6, 6),
+        "usd_high": round(high, 6),
         "price_checked": PRICE_DATE,
-        "source": MODEL_PRICE_URL,
+        "source": "https://developers.openai.com/api/docs/models/" + base_model,
         "note": "Estimate, not an invoice. Range allows for cache-write premiums; output tokens already include reasoning. Taxes and account discounts excluded.",
     }
 
@@ -71,6 +85,8 @@ async def resource_usage(db: Database, blobs: LocalBlobs | S3Blobs) -> dict:
       UNION SELECT j.protocol_id,c.input_hash FROM analysis_chunks c JOIN jobs j ON j.id=c.job_id
       UNION SELECT j.protocol_id,j.payload->>'input_hash' FROM jobs j WHERE j.kind='baseline_test'
       UNION SELECT j.protocol_id,c.result->>'raw_response_hash' FROM analysis_chunks c JOIN jobs j ON j.id=c.job_id WHERE c.result ? 'raw_response_hash'
+      UNION SELECT j.protocol_id,c.input_hash FROM model_calls c JOIN jobs j ON j.id=c.job_id
+      UNION SELECT j.protocol_id,c.response_hash FROM model_calls c JOIN jobs j ON j.id=c.job_id WHERE c.response_hash IS NOT NULL
     """)
     owners: dict[str, set[str]] = defaultdict(set)
     for row in references:
@@ -84,7 +100,7 @@ async def resource_usage(db: Database, blobs: LocalBlobs | S3Blobs) -> dict:
         (SELECT count(*) FROM subscriptions sub WHERE sub.protocol_id=p.id AND sub.active) AS sources,
         (SELECT count(*) FROM subscriptions sub JOIN sources s ON s.id=sub.source_id WHERE sub.protocol_id=p.id AND sub.active AND s.current_hash IS NOT NULL) AS baselined_sources,
         (SELECT count(*) FROM subscriptions sub JOIN events e ON e.source_id=sub.source_id WHERE sub.protocol_id=p.id AND NOT e.baseline) AS change_events,
-        (SELECT count(*) FROM jobs j JOIN analysis_chunks c ON c.job_id=j.id WHERE j.protocol_id=p.id) AS recorded_model_responses
+        ((SELECT count(*) FROM jobs j JOIN analysis_chunks c ON c.job_id=j.id WHERE j.protocol_id=p.id) + (SELECT count(*) FROM jobs j JOIN model_calls c ON c.job_id=j.id WHERE j.protocol_id=p.id AND c.status='RESPONDED')) AS recorded_model_responses
       FROM protocols p ORDER BY p.id
     """)
     for row in protocols:
@@ -110,6 +126,39 @@ def cost_text(cost: dict) -> str:
     if not cost.get("available"):
         return "API dollar estimate unavailable; consult the returned tokens and OpenAI usage dashboard."
     return f"Estimated API charge: ${cost['usd_low']:.4f}–${cost['usd_high']:.4f} USD (not an invoice)."
+
+
+def usage_markdown(calls: list[dict]) -> str:
+    lines = [
+        "## Measured model usage",
+        "",
+        "| Stage | Model | Input tokens | Output tokens | Estimated USD |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    for call in calls:
+        usage, cost = call["usage"], call["cost"]
+        amount = (
+            f"${cost['usd_low']:.5f}–${cost['usd_high']:.5f}"
+            if cost.get("available")
+            else "unavailable"
+        )
+        lines.append(
+            f"| {call['stage']} | {usage.get('returned_model', 'unknown')} | {usage.get('input_tokens', 'unknown')} | {usage.get('output_tokens', 'unknown')} | {amount} |"
+        )
+    if all(c["cost"].get("available") for c in calls):
+        low = sum(c["cost"]["usd_low"] for c in calls)
+        high = sum(c["cost"]["usd_high"] for c in calls)
+        lines.extend(
+            [
+                "",
+                f"Total estimated API charge: ${low:.5f}–${high:.5f}. Output tokens include reasoning. This is not an invoice.",
+            ]
+        )
+    else:
+        lines.extend(
+            ["", "Some calls lack a verified dollar estimate; total cost is not reported as zero."]
+        )
+    return "\n".join(lines)
 
 
 def resource_markdown(metrics: dict, cost: dict) -> str:

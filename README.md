@@ -13,7 +13,7 @@ Monitor public protocol documentation and web surfaces, preserve exact changes, 
 
 ## Broad analysis is the default
 
-Every real normalized change enters the general assessment, regardless of size or whether it matches an existing objective. The model is asked to look for consequential and unexpected developments, separate observation from inference, and state uncertainty. There is no mandatory per-protocol thesis and no keyword or AI triage gate in this release.
+Every real normalized change enters a broad general assessment, regardless of size or whether it matches an existing objective. The default tiered mode uses GPT-5.6 Luna for a concise first pass and GPT-5.6 Sol for important, novel, uncertain or incompletely screened changes, plus a 2% audit sample of routine results. There is no mandatory thesis or keyword gate. [Cost routing and measurements](docs/COST_OPTIMIZATION.md) describe the trade-offs and controls.
 
 Optional watch questions run in a **separate, additive assessment** after the general report is committed. The general model input excludes those questions, and prior context contains only general assessments. A focus assessment cannot suppress a general finding or alert. Collection never reads watch questions.
 

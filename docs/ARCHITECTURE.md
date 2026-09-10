@@ -13,6 +13,7 @@ Specification fingerprint: `c457a193bb9521408f50578c21488a65590970b1d6ea9af63814
 3. Optional focus runs as a separate additive pass. General inputs and prior general context exclude focus questions/results.
 4. Telegram is the initial output channel. GitHub Issues are an optional later destination.
 5. Name-only onboarding is available through an assistant with repository access; it produces verified source configuration. New adapters still require code when a surface is not supported.
+6. The owner explicitly requested inexpensive low-level assessment plus stronger analysis for important changes. Tiered analysis is now the default; broad screening, uncertainty escalation and audit sampling preserve discovery intent without claiming perfect recall.
 
 ## Core data flow
 
@@ -37,13 +38,13 @@ Source identity includes the acquisition/extraction policy and URL; compatible s
 
 ## Analysis and evidence
 
-The initial mode is always-deep. Every eligible real change reaches general analysis without a keyword or size threshold. The first unprocessed event anchors a fixed cluster window. Eligible events are linked to a single general job per protocol under a lock; later changes remain pending for future clusters.
+The default mode is tiered. Every eligible real change reaches broad screening without a keyword or size threshold. A confident routine result can avoid deep analysis; possible importance, novelty, uncertainty, invalid screening output and a 2% routine audit sample trigger deep review of the full change cluster. Multiple routine chunks receive a cheap cross-chunk check. The first unprocessed event anchors a fixed cluster window. Eligible events are linked to a single general job per protocol under a lock; later changes remain pending for future clusters. See [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md).
 
 Model jobs freeze protocol context, coverage, prior general inferences, model, effort, prompt version, and chunk limits. Every diff character is retained across chunks. Results and input hashes are checkpointed, so retries can reuse completed chunks. A cross-chunk pass can add findings but cannot erase earlier findings. Oversized work fails visibly while preserving its evidence; it is not silently truncated or labeled unimportant.
 
 Model responses use a strict schema and can cite only supplied event IDs. Source text and prior conclusions are explicitly untrusted evidence, with no tools available to the analysis model. Reports separate observation, significance, and uncertainty and include exact diffs and historical hashes. The initial report format is intentionally smaller than the specification's full research-report template; richer context retrieval and report fields remain later work.
 
-Material findings (MEDIUM/HIGH/CRITICAL) produce an outbox summary and Markdown document. A focus result has its own report and can only add alerts. Notification state is independent of collection and analysis: delivery failure never removes evidence or a completed report.
+Material findings (MEDIUM/HIGH/CRITICAL) are stored. HIGH/CRITICAL findings produce an immediate-alert outbox summary and Markdown document by default; the threshold is configurable. MEDIUM findings await the still-unimplemented daily digest. A focus result has its own report and can only add alerts. Notification state is independent of collection and analysis: delivery failure never removes evidence or a completed report.
 
 Telegram provides no client idempotency key for sends. The outbox records acknowledged message IDs, retries definite failures, and parks ambiguous submissions as UNKNOWN for operator reconciliation. Attachments wait for their summary to be acknowledged.
 

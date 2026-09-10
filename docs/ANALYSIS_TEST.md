@@ -7,9 +7,11 @@ Prerequisites: the eight repository secrets are configured, Telegram setup passe
 3. Open the new run. It should send a **TEST — BASELINE REVIEW** summary plus a Markdown document to the configured Telegram channel. The document is also shown in the run summary.
 4. Review the reported input, cached-input and output token counts, estimated API dollars, archive bytes per protocol, whole database size, and monthly scenarios. Output token counts include reasoning tokens; they are not charged twice in the estimate.
 
-The workflow makes at most one model submission for its run ID. It samples up to eight archived pages, spreads them through the URL inventory, and bounds excerpts and the complete serialized request to 48,000 bytes. Output is capped at 8,000 tokens. This is a paid test of existing snapshots, not a detected new change or a comprehensive baseline analysis. These test limits do not restrict production collection or the mandatory general analysis. Optional focus questions are not supplied.
+The workflow now defaults to one GPT-5.6 Luna call with low reasoning and a 2,000 output-token cap. It samples up to eight archived pages, spreads them through the URL inventory, and bounds excerpts and the complete serialized request to 48,000 bytes. This is a paid test of existing snapshots, not a detected new change or a comprehensive baseline analysis. These test limits do not restrict production collection. Production changes use the [tiered routing policy](COST_OPTIMIZATION.md); this one-call test does not automatically escalate. Existing saved requests retain their original model. Optional focus questions are not supplied.
 
 ## Reruns and failures
+
+For a saved response rejected during validation, use **Actions → Analysis receipt → Run workflow**, branch **main**, and enter the original numeric Analysis test run ID. This workflow reads the existing response and supplied snapshots, measures current storage, and publishes a clearly marked diagnostic to the run summary and logs. It has no OpenAI or Telegram credentials and makes no new model call or channel post. Invalid findings remain unapproved; inspecting them does not change their status. Future preview requests restrict evidence values to the exact supplied IDs in the JSON schema.
 
 **Re-run jobs on the same run** preserves the run ID and reuses the saved API response. A new **Run workflow** creates a new paid test. A report already acknowledged by Telegram is not automatically sent again on a same-run retry.
 
@@ -26,6 +28,8 @@ Postgres reports the physical size of the whole current database, including shar
 The report estimates 1, 10, 100 and 1,000 calls with this test's measured token workload. Real changes may require several chunks, synthesis and optional focus calls. Unchanged checks normally make no model calls. To estimate a new protocol, use a comparable baseline's exclusive archive size for an initial scenario, then measure new bytes and actual calls over a representative period. Change frequency and source size determine maintenance costs; protocol count alone does not.
 
 Pricing references checked 2026-09-09:
+
+- [GPT-5.6 Luna](https://developers.openai.com/api/docs/models/gpt-5.6-luna): $0.20/million input tokens, $0.02/million cached input, $1.20/million output, plus applicable cache-write premiums. This is the new screening/test default.
 
 - [GPT-5.6 Sol](https://developers.openai.com/api/docs/models/gpt-5.6-sol): standard input $4/million tokens, cached input $0.40/million, output $20/million. The estimate allows for cache-write premiums and the documented large-context multiplier. The stored price table refuses an estimate for unrecognized models or after its recheck date; tokens remain available. Taxes, discounts and invoices are separate.
 - [R2 Standard](https://developers.cloudflare.com/r2/pricing/): $0.015/GB-month, $4.50/million Class A operations, $0.36/million Class B operations, with account-wide free allowances and billing-unit rounding. Small incremental storage can fit existing allowances; current size does not measure monthly growth or request totals.
