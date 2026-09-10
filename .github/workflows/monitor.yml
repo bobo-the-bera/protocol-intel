@@ -25,6 +25,9 @@ concurrency:
 
 jobs:
   monitor:
+    permissions:
+      contents: read
+      actions: write
     if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -52,6 +55,7 @@ jobs:
       NOTIFICATIONS_ENABLED: ${{ vars.NOTIFICATIONS_ENABLED || 'true' }}
       DAILY_DIGEST_ENABLED: ${{ vars.DAILY_DIGEST_ENABLED || 'true' }}
       DAILY_DIGEST_HOUR_UTC: ${{ vars.DAILY_DIGEST_HOUR_UTC || '8' }}
+      PILOT_HOURS: '72'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -109,3 +113,30 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           cat health.json
+      - name: Disable this workflow when the pilot expires
+        if: always()
+        env:
+          GH_STOP_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          status = json.loads(subprocess.check_output(
+              ['uv', 'run', 'protocol-intel', 'pilot-status'], text=True))
+          if status['expired']:
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/monitor.yml/disable",
+                  method='PUT', headers={
+                      'Authorization': 'Bearer ' + os.environ['GH_STOP_TOKEN'],
+                      'Accept': 'application/vnd.github+json',
+                      'X-GitHub-Api-Version': '2026-03-10',
+                  })
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  if response.status != 204:
+                      raise RuntimeError('Workflow disable was not acknowledged')
+              print('72-hour pilot expired. Monitor workflow disabled; archived state preserved.')
+          else:
+              print(json.dumps(status))

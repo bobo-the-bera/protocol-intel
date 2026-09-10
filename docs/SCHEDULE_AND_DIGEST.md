@@ -1,6 +1,6 @@
 # Scheduled monitoring and daily Telegram reporting
 
-The owner requested this scoped docs/homepage pilot on 10 September 2026. Implementation is tested in PR #7; automatic approval review requires explicit activation approval before its merge. The existing eight secrets are sufficient. The recovered NEAR baseline test successfully delivered both summary and document in [run 34471081681](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34471081681); it reused the original response and incurred no new AI call.
+The owner requested this scoped docs/homepage pilot on 10 September 2026. The owner explicitly approved activation with a 72-hour automatic stop. PR #7 now includes that bounded trial; activation follows passing CI. The existing eight secrets are sufficient. The recovered NEAR baseline test successfully delivered both summary and document in [run 34471081681](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34471081681); it reused the original response and incurred no new AI call.
 
 ## Timing and controls
 
@@ -47,3 +47,13 @@ uv run protocol-intel failures
 `daily-digest` only queues the next due day and makes no model call or direct Telegram send. `cycle` runs enabled roles and sends queued work when notifications are enabled. Run **Actions → Monitor → Run workflow → main → cycle** for an immediate check; a cycle covers all enabled protocols. Repeated runs resume stored work. Do not rebaseline established sources or rerun the paid Analysis test to activate scheduling.
 
 CI run 34504177741 passed 126 tests with zero skips on implementation commit 6e0e2331e3131b08cc4f5d39666dda4f5791abb1. The first scheduled cycle and live daily digest must be recorded in VALIDATION.md after execution. Database/CI tests establish retry and boundary behavior; they do not themselves prove live scheduling or channel delivery.
+
+## 72-hour pilot deadline
+
+The Monitor workflow sets `PILOT_HOURS=72`. The first actual `cycle` inserts one database-clock start/deadline into `pilot_window`. Diagnostic/status runs do not start it. Retries, redeployments and subsequent runs reuse the same deadline. Removing the environment setting or re-enabling the workflow does not reset an existing window.
+
+At expiry, `cycle` starts no collection, model, digest or Telegram work. A cycle crossing the deadline is cancelled and recorded as STOPPED. Requests already accepted by a remote provider cannot be recalled; their existing receipt/uncertain-outcome safeguards still apply. No new cycle stage is started after expiry. Explicit manual operator commands remain available for diagnostics/recovery; the separate daemon deployment is not activated by this trial.
+
+The workflow's final step checks the persisted deadline and disables Monitor through GitHub's workflow API. Its job token has `actions: write` for this purpose, and that token is passed only to the final disable step. A disable failure remains visible and is retried at the next trigger; the database deadline still blocks further monitoring work. Archived data and pending work are preserved. Use `pilot-status` to inspect exact UTC start/end times. A later trial requires an explicit operator decision; there is no automatic reset.
+
+This is a time limit, not a dollar budget: analysis of real changes can incur API charges during the 72-hour window.

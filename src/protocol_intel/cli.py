@@ -23,6 +23,7 @@ from protocol_intel.config import Settings, canonical, digest, load_protocols
 from protocol_intel.database import Database, uid
 from protocol_intel.digests import queue_daily_digest
 from protocol_intel.http import HTTP
+from protocol_intel.pilot import pilot_status
 from protocol_intel.preview import generate_preview, inspect_preview
 from protocol_intel.release import release_status
 from protocol_intel.safety import safe_error
@@ -339,7 +340,31 @@ def retry_analysis(job_id: str):
 
 
 async def cycle_task(settings: Settings, db: Database, blobs) -> dict:
+    # An existing deadline stays binding even if a later deployment omits the pilot setting.
+    pilot = await pilot_status(db, settings.pilot_hours)
+    if pilot["expired"]:
+        return {"errors": {}, "pilot": pilot, "stopped": True}
     cycle_id = uid()
+    if not pilot["started"]:
+        return await _cycle_task(settings, db, blobs, cycle_id)
+    try:
+        async with asyncio.timeout(pilot["remaining_seconds"]) as deadline:
+            result = await _cycle_task(settings, db, blobs, cycle_id)
+        return {**result, "pilot": pilot}
+    except TimeoutError:
+        if not deadline.expired():
+            raise
+        stopped = {"errors": {}, "pilot": await pilot_status(db), "stopped": True}
+        # Interrupted paid sends remain in their existing uncertain-outcome recovery states.
+        await db.execute(
+            "UPDATE monitor_cycles SET completed_at=now(),status='STOPPED',result=CAST(:result AS jsonb) WHERE id=:id AND status='RUNNING'",
+            id=cycle_id,
+            result=canonical(stopped),
+        )
+        return stopped
+
+
+async def _cycle_task(settings: Settings, db: Database, blobs, cycle_id: str) -> dict:
     await db.execute("INSERT INTO monitor_cycles(id) VALUES(:id)", id=cycle_id)
     result: dict = {"cycle_id": cycle_id, "errors": {}}
 
@@ -445,6 +470,20 @@ def daily_digest():
     run(task())
 
 
+@app.command("pilot-status")
+def pilot_status_command():
+    """Read the pilot clock without starting or extending it."""
+
+    async def task():
+        db = Database(Settings().database_url.get_secret_value())
+        try:
+            show(await pilot_status(db))
+        finally:
+            await db.close()
+
+    run(task())
+
+
 @app.command()
 def status():
     """Show coverage, evidence, analysis backlog and Telegram delivery outcomes."""
@@ -463,6 +502,7 @@ def status():
                     "analysis": await db.rows("SELECT status,count(*) FROM jobs GROUP BY status"),
                     "delivery": await db.rows("SELECT status,count(*) FROM outbox GROUP BY status"),
                     "digest": await db.rows("SELECT next_day FROM daily_digest_state"),
+                    "pilot": await pilot_status(db),
                     "recent_cycles": await db.rows(
                         "SELECT id,started_at,completed_at,status,result FROM monitor_cycles ORDER BY started_at DESC LIMIT 5"
                     ),

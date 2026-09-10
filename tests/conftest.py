@@ -73,7 +73,7 @@ def migrated_database():
 async def db(migrated_database):
     database = Database(migrated_database)
     await database.execute(
-        "TRUNCATE protocols,sources,origins,storage_probes,reports,daily_digest_state,monitor_cycles CASCADE"
+        "TRUNCATE protocols,sources,origins,storage_probes,reports,daily_digest_state,monitor_cycles,pilot_window CASCADE"
     )
     try:
         yield database
