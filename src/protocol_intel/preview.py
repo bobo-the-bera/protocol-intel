@@ -126,7 +126,9 @@ async def inspect_preview(db: Database, blobs, run_id: str) -> str:
         "run_id": run_id,
         "job_status": row["status"],
         "usage": row["usage"],
-        "raw_model_output_unverified": raw.get("output", []),
+        "raw_model_output_unverified": [
+            item for item in raw.get("output", []) if item.get("type") == "message"
+        ],
         "supplied_snapshots": row["payload"]["sample"]["snapshots"],
     }
     rendered = json.dumps(diagnostic, ensure_ascii=False, indent=2)
@@ -151,13 +153,55 @@ async def inspect_preview(db: Database, blobs, run_id: str) -> str:
     )
 
 
+def validate_preview_evidence(result: Assessment, ids: set[str], recover: bool = False) -> list:
+    """Recover only exact legacy bracketed IDs; never guess or discard unknown references."""
+    original = []
+    for index, finding in enumerate(result.findings):
+        normalized = []
+        for evidence in finding.evidence:
+            if evidence in ids:
+                normalized.append(evidence)
+                continue
+            tags = re.findall(r"\[(snapshot:[a-f0-9]{64})\]", evidence)
+            remainder = re.sub(r"\[snapshot:[a-f0-9]{64}\]", "", evidence)
+            if (
+                not recover
+                or not tags
+                or not set(tags) <= ids
+                or re.search(r"snapshot\s*[:-]|[\[\]]", remainder.replace("[]", ""), re.IGNORECASE)
+            ):
+                raise ValueError(
+                    "Preview refers to missing snapshot evidence; paid response retained for review"
+                )
+            normalized.extend(tags)
+        if not normalized:
+            raise ValueError(
+                "Preview refers to missing snapshot evidence; paid response retained for review"
+            )
+        if normalized != finding.evidence:
+            original.append({"finding_index": index, "evidence": list(finding.evidence)})
+        finding.evidence = list(dict.fromkeys(normalized))
+    return original
+
+
 async def generate_preview(
-    db: Database, blobs, analyzer: OpenAIAnalyzer, settings: Settings, protocol: str, run_id: str
+    db: Database,
+    blobs,
+    analyzer: OpenAIAnalyzer | None,
+    settings: Settings,
+    protocol: str,
+    run_id: str,
+    *,
+    resume_only: bool = False,
 ) -> dict:
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", run_id):
         raise ValueError("Use a short alphanumeric run ID")
     job_id = "baseline-test-" + run_id
     existing = await db.rows("SELECT * FROM jobs WHERE id=:id", id=job_id)
+    if resume_only and (
+        not existing or existing[0]["status"] not in {"TEST_RESPONDED", "TEST_COMPLETE"}
+    ):
+        raise ValueError("Recovery requires an existing saved response; no model call was made")
     if not existing:
         payload = await prepare_preview(db, blobs, settings, protocol)
         payload["input_hash"] = await blobs.put(canonical(payload["request"]).encode())
@@ -180,6 +224,8 @@ async def generate_preview(
     ):
         raise ValueError("Archived preview request no longer matches its stored hash")
     if job["status"] == "TEST_PREPARED":
+        if analyzer is None:
+            raise ValueError("A model client is required for a new test")
         async with db.engine.begin() as conn:
             claimed = (
                 await conn.execute(
@@ -254,10 +300,7 @@ async def generate_preview(
     )
     result = Assessment.model_validate_json(content)
     ids = {item["id"] for item in payload["sample"]["snapshots"]}
-    if any(not f.evidence or not set(f.evidence) <= ids for f in result.findings):
-        raise ValueError(
-            "Preview refers to missing snapshot evidence; paid response retained for review"
-        )
+    original_evidence = validate_preview_evidence(result, ids, recover=resume_only)
     metrics = await resource_usage(db, blobs)
     details = {
         "usage": receipt["usage"],
@@ -265,11 +308,13 @@ async def generate_preview(
         "resources": metrics,
         "sampled_pages": payload["sample"]["sampled_pages"],
         "available_pages": payload["sample"]["available_archived_pages"],
+        "recovered_evidence": original_evidence,
     }
     lines = [
         f"# TEST — {protocol} baseline review",
         "",
         "This reviews sampled archived snapshots. It is not evidence of a new protocol change.",
+        "Citations identify supplied excerpts; they do not independently verify the model's interpretation. Missing or truncated documentation is not proof of a deployed vulnerability.",
         "",
         cost_text(cost),
         "",
@@ -278,7 +323,14 @@ async def generate_preview(
         f"Sample: {details['sampled_pages']} of {details['available_pages']} archived pages, with bounded excerpts. One model call; optional focus questions were not supplied.",
         "",
     ]
-    for finding in result.findings:
+    if original_evidence:
+        lines.extend(
+            [
+                "Recovery reused the archived response without a new model call. Exact bracketed source IDs were extracted from the original evidence prose, which is preserved below. Findings were not rewritten.",
+                "",
+            ]
+        )
+    for index, finding in enumerate(result.findings):
         lines.extend(
             [
                 f"## {finding.title}",
@@ -293,8 +345,11 @@ async def generate_preview(
                 "",
             ]
         )
-    if not result.findings:
-        lines.extend([result.nonmaterial_summary, ""])
+        for original in original_evidence:
+            if original["finding_index"] == index:
+                lines.extend(["Original model evidence: " + canonical(original["evidence"]), ""])
+    if result.nonmaterial_summary:
+        lines.extend(["Model's sample/context notes: " + result.nonmaterial_summary, ""])
     lines.extend(
         [resource_markdown(metrics, cost), "## Snapshot excerpts supplied to the model", ""]
     )

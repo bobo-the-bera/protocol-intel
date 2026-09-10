@@ -1,0 +1,67 @@
+name: Recover analysis test
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Original Analysis test run ID with a saved response; no new AI call'
+        required: true
+        type: string
+      protocol:
+        description: 'Protocol selected in the original test'
+        type: choice
+        options:
+          - near
+          - hyperlend
+        default: near
+
+permissions:
+  contents: read
+
+concurrency:
+  group: protocol-intel-monitor
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      BLOB_BACKEND: s3
+      S3_BUCKET: ${{ secrets.S3_BUCKET }}
+      S3_ENDPOINT_URL: ${{ secrets.S3_ENDPOINT_URL }}
+      S3_REGION: ${{ vars.S3_REGION || 'auto' }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      COLLECTION_ENABLED: 'false'
+      ANALYSIS_ENABLED: 'false'
+      NOTIFICATIONS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: '0.11.33'
+      - run: uv sync --frozen --no-dev
+      - run: uv run protocol-intel init-db
+      - name: Recover saved response and deliver test report
+        env:
+          TEST_RUN_ID: ${{ inputs.run_id }}
+          PROTOCOL_ID: ${{ inputs.protocol }}
+        run: uv run protocol-intel analysis-preview "$PROTOCOL_ID" --run-id "$TEST_RUN_ID" --resume-only --send --output test-report.md
+      - name: Publish recovery summary
+        if: always()
+        run: |
+          if [ -f test-report.md ]; then
+            cat test-report.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'Recovery did not produce a report. No new model call was made; inspect the recovery step. Use the original Analysis test run ID, not the receipt or recovery run ID.' >> "$GITHUB_STEP_SUMMARY"
+          fi

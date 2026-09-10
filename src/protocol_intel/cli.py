@@ -151,6 +151,7 @@ def analysis_preview(
     run_id: str = typer.Option(..., help="Reuse the same ID to resume without another paid call"),
     send: bool = False,
     output: Path | None = None,
+    resume_only: bool = typer.Option(False, help="Require a saved response; never call OpenAI"),
 ):
     """Make one paid sampled baseline review; optionally send its labeled report to Telegram."""
 
@@ -164,8 +165,11 @@ def analysis_preview(
             if send:
                 telegram = Telegram(settings)
                 await telegram.check()
-            analyzer = OpenAIAnalyzer(settings)
-            report = await generate_preview(db, blobs, analyzer, settings, protocol, run_id)
+            if not resume_only:
+                analyzer = OpenAIAnalyzer(settings)
+            report = await generate_preview(
+                db, blobs, analyzer, settings, protocol, run_id, resume_only=resume_only
+            )
             show({"report_id": report["id"], **report["result"]["_preview"]})
             if output:
                 output.parent.mkdir(parents=True, exist_ok=True)
