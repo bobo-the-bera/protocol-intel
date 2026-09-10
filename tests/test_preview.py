@@ -10,7 +10,7 @@ from protocol_intel.analysis import claim_job, queue_clusters
 from protocol_intel.blobs import S3Blobs, blob_key
 from protocol_intel.config import canonical
 from protocol_intel.costs import archive_inventory, model_cost, resource_usage
-from protocol_intel.preview import generate_preview, prepare_preview
+from protocol_intel.preview import generate_preview, inspect_preview, prepare_preview
 from protocol_intel.telegram import deliver_one, summary_text
 
 
@@ -49,6 +49,18 @@ def test_cost_accounts_for_cache_without_double_counting_reasoning():
                 "input_tokens_details": {"cached_tokens": 2},
             }
         )
+
+
+def test_reported_cache_writes_produce_specific_token_cost():
+    cost = model_cost(
+        {
+            "returned_model": "gpt-5.6-sol",
+            "input_tokens": 7852,
+            "output_tokens": 4469,
+            "input_tokens_details": {"cache_write_tokens": 7849, "cached_tokens": 0},
+        }
+    )
+    assert cost["usd_low"] == cost["usd_high"] == pytest.approx(0.128637)
 
 
 async def test_inventory_paginates_both_owned_prefixes():
@@ -95,7 +107,12 @@ async def test_preview_bounds_full_serialized_request_and_omits_focus(blobs, set
     assert result["sample"]["available_archived_pages"] == 20
     assert all(s["truncated"] for s in result["sample"]["snapshots"])
     assert "focus" not in result["sample"]
-    assert result["request"]["max_output_tokens"] == 8000
+    assert result["request"]["max_output_tokens"] == settings.screen_max_output_tokens
+    evidence_schema = result["request"]["text"]["format"]["schema"]["$defs"]["Finding"][
+        "properties"
+    ]["evidence"]
+    assert evidence_schema["items"]["enum"] == [s["id"] for s in result["sample"]["snapshots"]]
+    assert evidence_schema["minItems"] == 1
 
 
 async def baseline(db, blobs, protocol):
@@ -245,3 +262,45 @@ async def test_test_delivery_is_scoped_labeled_and_deduplicated(db, blobs, proto
         r["status"] == "PENDING"
         for r in await db.rows("SELECT status FROM outbox WHERE report_id=:id", id=reports[0]["id"])
     )
+
+
+@pytest.mark.postgres
+async def test_inspection_exposes_invalid_references_without_approving_or_recharging(
+    db, blobs, protocol, settings
+):
+    await baseline(db, blobs, protocol)
+    content = canonical(
+        {
+            "findings": [
+                {
+                    "title": "Unverified",
+                    "importance": "HIGH",
+                    "observed_change": "Existing state",
+                    "significance": "Possible implication",
+                    "evidence": ["invented-reference"],
+                    "uncertainty": "Unknown",
+                }
+            ],
+            "nonmaterial_summary": "",
+        }
+    )
+    analyzer = analyzer_response(content=content)
+    with pytest.raises(ValueError, match="missing snapshot evidence"):
+        await generate_preview(db, blobs, analyzer, settings, protocol.id, "inspect")
+    document = await inspect_preview(db, blobs, "inspect")
+    assert "invented-reference" in document
+    assert "snapshot-1" in document
+    assert protocol.sources[0].identity() in document
+    assert "Measured storage" in document
+    assert "unverified" in document
+    assert analyzer.client.responses.create.await_count == 1
+    assert await db.rows("SELECT * FROM reports") == []
+    assert await db.rows("SELECT * FROM outbox") == []
+    assert (await db.rows("SELECT status FROM jobs"))[0]["status"] == "TEST_RESPONDED"
+
+
+@pytest.mark.postgres
+async def test_inspecting_missing_receipt_never_creates_work(db, blobs):
+    with pytest.raises(ValueError, match="no model call"):
+        await inspect_preview(db, blobs, "not-found")
+    assert await db.rows("SELECT * FROM jobs") == []

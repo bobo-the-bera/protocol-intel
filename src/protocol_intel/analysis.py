@@ -5,14 +5,15 @@ import contextlib
 import difflib
 import re
 from datetime import timedelta
-from typing import Literal
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict
 from sqlalchemy import text
 
 from protocol_intel.blobs import BlobStore
 from protocol_intel.config import Settings, canonical
+from protocol_intel.contracts import Assessment
+from protocol_intel.contracts import Finding as Finding
+from protocol_intel.costs import usage_markdown
 from protocol_intel.database import Database, uid
 from protocol_intel.safety import safe_error
 
@@ -27,22 +28,6 @@ Do not invent numeric launch probabilities. Use only the supplied event IDs as e
 Typos and clearly mechanical changes can produce an empty findings list. A new technical
 capability can be important even if it conflicts with old conclusions. Never claim full
 coverage when the supplied coverage record is degraded. There are no execution tools."""
-
-
-class Finding(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    title: str
-    importance: Literal["LOW", "MEDIUM", "HIGH", "CRITICAL"]
-    observed_change: str
-    significance: str
-    evidence: list[str]
-    uncertainty: str
-
-
-class Assessment(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    findings: list[Finding]
-    nonmaterial_summary: str
 
 
 def frozen_request(payload: dict, evidence: dict) -> dict:
@@ -219,6 +204,12 @@ async def queue_clusters(
                 "coverage": coverage,
                 "prior": prior,
                 "kind": "general",
+                "analysis_mode": protocol["analysis"]["mode"],
+                "screen_model": settings.openai_screen_model,
+                "screen_effort": settings.openai_screen_reasoning_effort,
+                "screen_max_output_tokens": settings.screen_max_output_tokens,
+                "request_max_bytes": settings.analysis_request_max_bytes,
+                "audit_percent": settings.analysis_audit_percent,
                 "model": settings.openai_deep_model,
                 "effort": settings.openai_deep_reasoning_effort,
                 "chunk_chars": settings.analysis_chunk_chars,
@@ -226,7 +217,7 @@ async def queue_clusters(
                 "prompt_version": "2",
                 "system_prompt": GENERAL,
                 "response_schema": Assessment.model_json_schema(),
-                "max_output_tokens": 16000,
+                "max_output_tokens": settings.deep_max_output_tokens,
             }
             job_id = uid()
             await conn.execute(
@@ -427,75 +418,95 @@ async def process_job(
             raise ValueError(
                 "Analysis exceeds configured chunk budget; evidence retained, job requires review"
             )
-        valid_ids = set(payload["events"])
-        findings, summaries = [], []
+        route_metadata = None
+        if payload.get("analysis_mode") == "tiered":
+            from protocol_intel.tiered import assess_tiered
 
-        async def assess_chunk(ordinal: int, chunk: dict) -> Assessment:
-            input_hash = await blobs.put(canonical(frozen_request(payload, chunk)).encode())
-            cached = await db.rows(
-                "SELECT * FROM analysis_chunks WHERE job_id=:job AND ordinal=:ordinal",
-                job=job["id"],
-                ordinal=ordinal,
-            )
-            if cached:
-                if cached[0]["input_hash"] != input_hash:
-                    raise ValueError("Retry input differs from the archived analysis input")
-                return Assessment.model_validate(cached[0]["result"])
-            result, usage = await analyzer.assess(payload, chunk)
-            supplied_ids = set(chunk.get("event_ids", [])) | {
-                event["id"] for event in chunk.get("events", [])
-            }
-            for finding in result.findings:
-                if not finding.evidence or not set(finding.evidence) <= (valid_ids & supplied_ids):
-                    raise ValueError("Finding refers to missing or invented evidence IDs")
-            async with db.engine.begin() as conn:
-                owned = (
+            combined, route_metadata = await assess_tiered(db, blobs, analyzer, job, chunks)
+        else:
+            valid_ids = set(payload["events"])
+            findings, summaries = [], []
+
+            async def assess_chunk(ordinal: int, chunk: dict) -> Assessment:
+                input_hash = await blobs.put(canonical(frozen_request(payload, chunk)).encode())
+                cached = await db.rows(
+                    "SELECT * FROM analysis_chunks WHERE job_id=:job AND ordinal=:ordinal",
+                    job=job["id"],
+                    ordinal=ordinal,
+                )
+                if cached:
+                    if cached[0]["input_hash"] != input_hash:
+                        raise ValueError("Retry input differs from the archived analysis input")
+                    return Assessment.model_validate(cached[0]["result"])
+                result, usage = await analyzer.assess(payload, chunk)
+                supplied_ids = set(chunk.get("event_ids", [])) | {
+                    event["id"] for event in chunk.get("events", [])
+                }
+                for finding in result.findings:
+                    if not finding.evidence or not set(finding.evidence) <= (
+                        valid_ids & supplied_ids
+                    ):
+                        raise ValueError("Finding refers to missing or invented evidence IDs")
+                async with db.engine.begin() as conn:
+                    owned = (
+                        await conn.execute(
+                            text(
+                                "SELECT id FROM jobs WHERE id=:id AND lease_token=:token AND status='RUNNING' AND lease_until>now() FOR UPDATE"
+                            ),
+                            {"id": job["id"], "token": job["lease_token"]},
+                        )
+                    ).first()
+                    if not owned:
+                        raise ValueError("Analysis lease expired before chunk commit")
                     await conn.execute(
                         text(
-                            "SELECT id FROM jobs WHERE id=:id AND lease_token=:token AND status='RUNNING' AND lease_until>now() FOR UPDATE"
+                            "INSERT INTO analysis_chunks VALUES(:job,:ordinal,:hash,CAST(:result AS jsonb),CAST(:usage AS jsonb)) ON CONFLICT DO NOTHING"
                         ),
-                        {"id": job["id"], "token": job["lease_token"]},
+                        {
+                            "job": job["id"],
+                            "ordinal": ordinal,
+                            "hash": input_hash,
+                            "result": result.model_dump_json(),
+                            "usage": canonical(usage),
+                        },
                     )
-                ).first()
-                if not owned:
-                    raise ValueError("Analysis lease expired before chunk commit")
-                await conn.execute(
-                    text(
-                        "INSERT INTO analysis_chunks VALUES(:job,:ordinal,:hash,CAST(:result AS jsonb),CAST(:usage AS jsonb)) ON CONFLICT DO NOTHING"
-                    ),
+                return result
+
+            for ordinal, chunk in enumerate(chunks):
+                result = await assess_chunk(ordinal, chunk)
+                findings.extend(result.findings)
+                summaries.append(result.nonmaterial_summary)
+            if len(chunks) > 1:
+                # Synthesis may add cross-chunk connections but cannot erase a chunk's findings.
+                result = await assess_chunk(
+                    len(chunks),
                     {
-                        "job": job["id"],
-                        "ordinal": ordinal,
-                        "hash": input_hash,
-                        "result": result.model_dump_json(),
-                        "usage": canonical(usage),
+                        "synthesis_instruction": "Identify additional connections across these complete chunk assessments; do not repeat existing findings.",
+                        "chunk_findings": [f.model_dump() for f in findings],
+                        "chunk_notes": summaries,
+                        "event_ids": sorted(valid_ids),
                     },
                 )
-            return result
-
-        for ordinal, chunk in enumerate(chunks):
-            result = await assess_chunk(ordinal, chunk)
-            findings.extend(result.findings)
-            summaries.append(result.nonmaterial_summary)
-        if len(chunks) > 1:
-            # Synthesis may add cross-chunk connections but cannot erase a chunk's findings.
-            result = await assess_chunk(
-                len(chunks),
-                {
-                    "synthesis_instruction": "Identify additional connections across these complete chunk assessments; do not repeat existing findings.",
-                    "chunk_findings": [f.model_dump() for f in findings],
-                    "chunk_notes": summaries,
-                    "event_ids": sorted(valid_ids),
-                },
+                findings.extend(result.findings)
+            unique = {canonical(finding.model_dump()): finding for finding in findings}
+            combined = Assessment(
+                findings=list(unique.values()), nonmaterial_summary="\n".join(summaries)
             )
-            findings.extend(result.findings)
-        unique = {canonical(finding.model_dump()): finding for finding in findings}
-        combined = Assessment(
-            findings=list(unique.values()), nonmaterial_summary="\n".join(summaries)
-        )
         report = render_report(
             payload["protocol"], job["id"], job["kind"], combined, evidence, payload["coverage"]
         )
+        report_result = combined.model_dump()
+        if route_metadata:
+            report_result["_pipeline"] = route_metadata
+            report += (
+                "\nDeep-review reason: "
+                + (
+                    route_metadata["deep_reason"]
+                    or "Confident routine screening; no deep call needed"
+                )
+                + "\n\n"
+            )
+            report += usage_markdown(route_metadata["model_calls"]) + "\n"
         report_hash = await blobs.put(report.encode())
         material = any(f.importance != "LOW" for f in combined.findings)
         async with db.engine.begin() as conn:
@@ -517,11 +528,16 @@ async def process_job(
                     "id": job["id"],
                     "protocol": job["protocol_id"],
                     "material": material,
-                    "result": combined.model_dump_json(),
+                    "result": canonical(report_result),
                     "hash": report_hash,
                 },
             )
-            if material and settings.telegram_chat_id:
+            priorities = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
+            alert = any(
+                priorities[f.importance] >= priorities[settings.telegram_alert_min_importance]
+                for f in combined.findings
+            )
+            if alert and settings.telegram_chat_id:
                 for part in ("summary", "document"):
                     await conn.execute(
                         text(

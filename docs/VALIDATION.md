@@ -1,5 +1,13 @@
 # Prepared release validation
 
+## First live model response — 9 September 2026
+
+[Analysis test 34414521438](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34414521438) received a completed GPT-5.6 Sol response: 7,852 input tokens (7,849 cache-write tokens, zero cache hits), 4,469 output tokens including 2,509 reasoning tokens. At the recorded standard rates its token estimate is $0.128637, not a verified invoice. Raw response and usage were saved before validation.
+
+The run failed evidence-ID validation and sent no analysis report to Telegram. The exact mismatch cannot be inferred from the error alone. The Analysis receipt workflow exposes the saved response and supplied evidence without another model call; follow-up must inspect that data before repairing or replacing findings. New preview schemas constrain citations to the allowed IDs. This is an unresolved live output-validation failure, not successful end-to-end delivery.
+
+The production daily digest remains unimplemented (SPEC-02). Monitor defines an hourly `17 * * * *` schedule gated by `MONITOR_ENABLED`; the scheduled run at 22:28 UTC was skipped. Analysis and notification flags default off. At the time of this run immediate alerts included MEDIUM findings; the cost-routing change raises the default immediate threshold to HIGH while preserving MEDIUM reports. Digest implementation and its acceptance tests remain required before enabling the requested daily-plus-urgent behavior.
+
 ## Successful live reference baselines — 9 September 2026
 
 [First run 34411588023](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34411588023) passed on main after the decompression fix. NEAR recorded 70 BASELINE observations and HyperLend recorded 66; both reported `baseline_complete: true`. These counts include configured source kinds such as sitemaps, not exclusively documentation pages. Archive conditional-write/readback and fresh-process verification passed again. Baselines made no model calls and requested no Telegram alerts.

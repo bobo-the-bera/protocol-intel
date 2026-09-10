@@ -16,7 +16,7 @@ def test_no_thesis_is_required(tmp_path):
         "id: test\nname: Test\nsources:\n  - id: docs\n    url: https://docs.example.org/\n"
     )
     protocol = load_protocols(tmp_path)[0]
-    assert protocol.analysis == Analysis(mode="always_deep", focus=[])
+    assert protocol.analysis == Analysis(mode="tiered", focus=[])
 
 
 def test_unknown_config_is_rejected():

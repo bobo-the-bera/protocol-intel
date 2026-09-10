@@ -129,7 +129,11 @@ Open **Settings → Secrets and variables → Actions → Variables** and set, a
 | --- | --- | --- |
 | `S3_REGION` | `auto` | Set an actual AWS region when using AWS S3 |
 | `OPENAI_DEEP_MODEL` | `gpt-5.6-sol` | Explicit model; change if your API project uses another supported Responses/structured-output model |
-| `OPENAI_DEEP_REASONING_EFFORT` | `high` | Must be supported by the chosen model |
+| `OPENAI_DEEP_REASONING_EFFORT` | `medium` | Deep review; must be supported by the chosen model |
+| `OPENAI_SCREEN_MODEL` | `gpt-5.6-luna` | Inexpensive broad screening and sampled test |
+| `OPENAI_SCREEN_REASONING_EFFORT` | `low` | Screening effort |
+| `ANALYSIS_AUDIT_PERCENT` | `2` | Deterministic percentage of routine clusters sent for deep audit |
+| `TELEGRAM_ALERT_MIN_IMPORTANCE` | `HIGH` | Immediate alert threshold; MEDIUM findings remain archived |
 | `ANALYSIS_ENABLED` | `false` | Allow model analysis during a cycle |
 | `NOTIFICATIONS_ENABLED` | `false` | Allow actual report delivery |
 | `MONITOR_ENABLED` | `false` | Allow scheduled hourly cycles |

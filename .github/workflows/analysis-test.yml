@@ -32,8 +32,8 @@ jobs:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      OPENAI_DEEP_MODEL: ${{ vars.OPENAI_DEEP_MODEL || 'gpt-5.6-sol' }}
-      OPENAI_DEEP_REASONING_EFFORT: ${{ vars.OPENAI_DEEP_REASONING_EFFORT || 'high' }}
+      OPENAI_SCREEN_MODEL: ${{ vars.OPENAI_SCREEN_MODEL || 'gpt-5.6-luna' }}
+      OPENAI_SCREEN_REASONING_EFFORT: ${{ vars.OPENAI_SCREEN_REASONING_EFFORT || 'low' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
       COLLECTION_ENABLED: 'false'

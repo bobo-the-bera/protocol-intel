@@ -22,7 +22,7 @@ from protocol_intel.collector import run_due
 from protocol_intel.config import Settings, digest, load_protocols
 from protocol_intel.database import Database
 from protocol_intel.http import HTTP
-from protocol_intel.preview import generate_preview
+from protocol_intel.preview import generate_preview, inspect_preview
 from protocol_intel.release import release_status
 from protocol_intel.safety import safe_error
 from protocol_intel.setup import check_storage, storage_identity
@@ -197,6 +197,24 @@ def analysis_preview(
                 await analyzer.close()
             if telegram:
                 await telegram.close()
+            await db.close()
+
+    run(task())
+
+
+@app.command("analysis-receipt")
+def analysis_receipt(run_id: str, output: Path):
+    """Inspect an archived test and storage without invoking AI or sending Telegram messages."""
+
+    async def task():
+        settings = Settings()
+        db = Database(settings.database_url.get_secret_value())
+        try:
+            report = await inspect_preview(db, open_blobs(settings), run_id)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(report, encoding="utf-8")
+            show({"receipt": str(output), "new_model_calls": 0, "telegram_messages": 0})
+        finally:
             await db.close()
 
     run(task())
