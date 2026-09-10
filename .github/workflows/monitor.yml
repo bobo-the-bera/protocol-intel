@@ -8,13 +8,13 @@ on:
         required: true
         type: choice
         default: status
-        options: [baseline, cycle, collect, analyze, notify, status]
+        options: [baseline, cycle, collect, analyze, digest, notify, status]
       protocol:
         description: 'Protocol ID required for baseline (near or hyperlend initially)'
         type: string
         default: near
   schedule:
-    - cron: '17 * * * *'
+    - cron: '7,22,37,52 * * * *'
 
 permissions:
   contents: read
@@ -25,7 +25,10 @@ concurrency:
 
 jobs:
   monitor:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED == 'true')
+    permissions:
+      contents: read
+      actions: write
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'workflow_dispatch' || vars.MONITOR_ENABLED != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -47,8 +50,12 @@ jobs:
       TELEGRAM_ALERT_MIN_IMPORTANCE: ${{ vars.TELEGRAM_ALERT_MIN_IMPORTANCE || 'HIGH' }}
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-      ANALYSIS_ENABLED: ${{ vars.ANALYSIS_ENABLED || 'false' }}
-      NOTIFICATIONS_ENABLED: ${{ vars.NOTIFICATIONS_ENABLED || 'false' }}
+      COLLECTION_ENABLED: ${{ vars.COLLECTION_ENABLED || 'true' }}
+      ANALYSIS_ENABLED: ${{ vars.ANALYSIS_ENABLED || 'true' }}
+      NOTIFICATIONS_ENABLED: ${{ vars.NOTIFICATIONS_ENABLED || 'true' }}
+      DAILY_DIGEST_ENABLED: ${{ vars.DAILY_DIGEST_ENABLED || 'true' }}
+      DAILY_DIGEST_HOUR_UTC: ${{ vars.DAILY_DIGEST_HOUR_UTC || '8' }}
+      PILOT_HOURS: '72'
     steps:
       - uses: actions/checkout@v7
         with:
@@ -89,23 +96,47 @@ jobs:
             baseline) uv run protocol-intel baseline "$PROTOCOL_ID" ;;
             collect) uv run protocol-intel run-due --limit 2000 ;;
             analyze) uv run protocol-intel analyze --limit 5 ;;
+            digest) uv run protocol-intel daily-digest ;;
             notify) uv run protocol-intel notify --limit 40 ;;
             status) uv run protocol-intel status; uv run protocol-intel failures ;;
-            cycle)
-              collection_result=0
-              analysis_result=0
-              uv run protocol-intel run-due --limit 2000 || collection_result=$?
-              if [ "$ANALYSIS_ENABLED" = true ]; then
-                uv run protocol-intel analyze --limit 5 || analysis_result=$?
-              fi
-              if [ "$NOTIFICATIONS_ENABLED" = true ]; then
-                uv run protocol-intel notify --limit 40
-              fi
-              uv run protocol-intel status
-              if [ "$collection_result" -ne 0 ] || [ "$analysis_result" -ne 0 ]; then
-                uv run protocol-intel failures
-                exit 1
-              fi
-              ;;
+            cycle) uv run protocol-intel cycle ;;
             *) exit 1 ;;
           esac
+      - name: Publish cycle health
+        if: always()
+        run: |
+          uv run protocol-intel status > health.json
+          {
+            echo '## Current monitor health'
+            echo '```json'
+            cat health.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat health.json
+      - name: Disable this workflow when the pilot expires
+        if: always()
+        env:
+          GH_STOP_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          status = json.loads(subprocess.check_output(
+              ['uv', 'run', 'protocol-intel', 'pilot-status'], text=True))
+          if status['expired']:
+              request = urllib.request.Request(
+                  f"https://api.github.com/repos/{os.environ['GITHUB_REPOSITORY']}/actions/workflows/monitor.yml/disable",
+                  method='PUT', headers={
+                      'Authorization': 'Bearer ' + os.environ['GH_STOP_TOKEN'],
+                      'Accept': 'application/vnd.github+json',
+                      'X-GitHub-Api-Version': '2026-03-10',
+                  })
+              with urllib.request.urlopen(request, timeout=30) as response:
+                  if response.status != 204:
+                      raise RuntimeError('Workflow disable was not acknowledged')
+              print('72-hour pilot expired. Monitor workflow disabled; archived state preserved.')
+          else:
+              print(json.dumps(status))

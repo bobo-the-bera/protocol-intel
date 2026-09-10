@@ -19,9 +19,11 @@ from protocol_intel.analysis import (
 )
 from protocol_intel.blobs import open_blobs
 from protocol_intel.collector import run_due
-from protocol_intel.config import Settings, digest, load_protocols
-from protocol_intel.database import Database
+from protocol_intel.config import Settings, canonical, digest, load_protocols
+from protocol_intel.database import Database, uid
+from protocol_intel.digests import queue_daily_digest
 from protocol_intel.http import HTTP
+from protocol_intel.pilot import pilot_status
 from protocol_intel.preview import generate_preview, inspect_preview
 from protocol_intel.release import release_status
 from protocol_intel.safety import safe_error
@@ -337,6 +339,151 @@ def retry_analysis(job_id: str):
     run(task())
 
 
+async def cycle_task(settings: Settings, db: Database, blobs) -> dict:
+    # An existing deadline stays binding even if a later deployment omits the pilot setting.
+    pilot = await pilot_status(db, settings.pilot_hours)
+    if pilot["expired"]:
+        return {"errors": {}, "pilot": pilot, "stopped": True}
+    cycle_id = uid()
+    if not pilot["started"]:
+        return await _cycle_task(settings, db, blobs, cycle_id)
+    try:
+        async with asyncio.timeout(pilot["remaining_seconds"]) as deadline:
+            result = await _cycle_task(settings, db, blobs, cycle_id)
+        return {**result, "pilot": pilot}
+    except TimeoutError:
+        if not deadline.expired():
+            raise
+        stopped = {"errors": {}, "pilot": await pilot_status(db), "stopped": True}
+        # Interrupted paid sends remain in their existing uncertain-outcome recovery states.
+        await db.execute(
+            "UPDATE monitor_cycles SET completed_at=now(),status='STOPPED',result=CAST(:result AS jsonb) WHERE id=:id AND status='RUNNING'",
+            id=cycle_id,
+            result=canonical(stopped),
+        )
+        return stopped
+
+
+async def _cycle_task(settings: Settings, db: Database, blobs, cycle_id: str) -> dict:
+    await db.execute("INSERT INTO monitor_cycles(id) VALUES(:id)", id=cycle_id)
+    result: dict = {"cycle_id": cycle_id, "errors": {}}
+
+    async def stage(name, operation):
+        try:
+            value = await operation()
+            result[name] = value
+            if isinstance(value, dict) and (
+                value.get("FAILED_TO_CHECK") or value.get("failed_attempts")
+            ):
+                result["errors"][name] = "Failures remain visible; inspect the recorded details"
+        except Exception as exc:
+            result["errors"][name] = safe_error(exc)
+
+    async def collect():
+        http = HTTP(settings, db)
+        try:
+            return await run_due(db, blobs, http, 2000)
+        finally:
+            await http.close()
+
+    async def deliver():
+        telegram = Telegram(settings)
+        try:
+            count = 0
+            for _ in range(40):
+                if not await deliver_one(db, blobs, telegram):
+                    break
+                count += 1
+            unresolved = await db.rows(
+                "SELECT status,count(*) AS count FROM outbox WHERE status IN ('FAILED','UNKNOWN') OR (status='PENDING' AND last_error IS NOT NULL) GROUP BY status"
+            )
+            if unresolved:
+                result["errors"]["delivery"] = canonical(unresolved)
+            return {"attempts": count, "unresolved": unresolved}
+        finally:
+            await telegram.close()
+
+    # Each stage runs even after another fails, so a collector error cannot suppress health delivery.
+    if settings.collection_enabled:
+        await stage("collection", collect)
+    if settings.analysis_enabled:
+        await stage("analysis", lambda: analyze_task(settings, db, 5))
+    if settings.daily_digest_enabled:
+        await stage("digest", lambda: queue_daily_digest(db, blobs, settings))
+    if settings.notifications_enabled:
+        await stage("delivery", deliver)
+    unhealthy = await db.rows("""
+      SELECT j.id,j.status FROM jobs j JOIN protocols p ON p.id=j.protocol_id
+      WHERE p.enabled AND j.kind IN ('general','focus') AND j.status IN ('FAILED','BLOCKED')
+    """)
+    if unhealthy:
+        result["errors"]["analysis_backlog"] = canonical(unhealthy)
+    await db.execute(
+        "UPDATE monitor_cycles SET completed_at=now(),status=:status,result=CAST(:result AS jsonb) WHERE id=:id",
+        id=cycle_id,
+        status="FAILED" if result["errors"] else "COMPLETE",
+        result=canonical(result),
+    )
+    return result
+
+
+@app.command()
+def cycle():
+    """Run one configured collection/analysis/digest/delivery cycle and persist its outcome."""
+
+    async def task():
+        settings, protocols = configuration()
+        db = Database(settings.database_url.get_secret_value())
+        try:
+            await db.sync(protocols)
+            result = await cycle_task(settings, db, open_blobs(settings))
+            show(result)
+            if result["errors"]:
+                raise ValueError(
+                    "Cycle completed with unresolved failures; inspect its stage results"
+                )
+        finally:
+            await db.close()
+
+    run(task())
+
+
+@app.command("daily-digest")
+def daily_digest():
+    """Queue the next due UTC day's stored-report digest; no model call or direct send."""
+
+    async def task():
+        settings = Settings()
+        db = Database(settings.database_url.get_secret_value())
+        try:
+            show(
+                {
+                    "digest_report_id": await queue_daily_digest(
+                        db, open_blobs(settings), settings
+                    ),
+                    "new_model_calls": 0,
+                }
+            )
+        finally:
+            await db.close()
+
+    run(task())
+
+
+@app.command("pilot-status")
+def pilot_status_command():
+    """Read the pilot clock without starting or extending it."""
+
+    async def task():
+        db = Database(Settings().database_url.get_secret_value())
+        try:
+            show(await pilot_status(db))
+        finally:
+            await db.close()
+
+    run(task())
+
+
 @app.command()
 def status():
     """Show coverage, evidence, analysis backlog and Telegram delivery outcomes."""
@@ -354,6 +501,11 @@ def status():
                     ),
                     "analysis": await db.rows("SELECT status,count(*) FROM jobs GROUP BY status"),
                     "delivery": await db.rows("SELECT status,count(*) FROM outbox GROUP BY status"),
+                    "digest": await db.rows("SELECT next_day FROM daily_digest_state"),
+                    "pilot": await pilot_status(db),
+                    "recent_cycles": await db.rows(
+                        "SELECT id,started_at,completed_at,status,result FROM monitor_cycles ORDER BY started_at DESC LIMIT 5"
+                    ),
                 }
             )
         finally:
@@ -485,7 +637,7 @@ def evidence(content_hash: str, output: Path):
 
 
 @app.command()
-def worker(role: Literal["all", "collector", "analyzer", "notifier"] = "all"):
+def worker(role: Literal["all", "collector", "analyzer", "notifier", "digester"] = "all"):
     """Run independent role loops; enable each role explicitly in environment settings."""
 
     async def task():
@@ -501,6 +653,8 @@ def worker(role: Literal["all", "collector", "analyzer", "notifier"] = "all"):
                         show({"collector": await run_due(db, blobs, http)})
                     elif kind == "analyzer":
                         show({"analyzer": await analyze_task(settings, db, 5)})
+                    elif kind == "digester":
+                        show({"digest": await queue_daily_digest(db, blobs, settings)})
                     elif telegram:
                         for _ in range(20):
                             if not await deliver_one(db, blobs, telegram):
@@ -515,6 +669,7 @@ def worker(role: Literal["all", "collector", "analyzer", "notifier"] = "all"):
                 ("collector", settings.collection_enabled),
                 ("analyzer", settings.analysis_enabled),
                 ("notifier", settings.notifications_enabled),
+                ("digester", settings.daily_digest_enabled),
             ]
             tasks = [kind for kind, flag in enabled if flag and role in {"all", kind}]
             if not tasks:

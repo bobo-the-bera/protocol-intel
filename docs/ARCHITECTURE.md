@@ -44,7 +44,7 @@ Model jobs freeze protocol context, coverage, prior general inferences, model, e
 
 Model responses use a strict schema and can cite only supplied event IDs. Source text and prior conclusions are explicitly untrusted evidence, with no tools available to the analysis model. Reports separate observation, significance, and uncertainty and include exact diffs and historical hashes. The initial report format is intentionally smaller than the specification's full research-report template; richer context retrieval and report fields remain later work.
 
-Material findings (MEDIUM/HIGH/CRITICAL) are stored. HIGH/CRITICAL findings produce an immediate-alert outbox summary and Markdown document by default; the threshold is configurable. MEDIUM findings await the still-unimplemented daily digest. A focus result has its own report and can only add alerts. Notification state is independent of collection and analysis: delivery failure never removes evidence or a completed report.
+Material findings (MEDIUM/HIGH/CRITICAL) are stored. HIGH/CRITICAL findings produce an immediate-alert outbox summary and Markdown document by default; the threshold is configurable. MEDIUM findings enter the daily digest, which reads stored reports and makes no model call. A focus result has its own report and can only add alerts. Notification state is independent of collection and analysis: delivery failure never removes evidence or a completed report.
 
 Telegram provides no client idempotency key for sends. The outbox records acknowledged message IDs, retries definite failures, and parks ambiguous submissions as UNKNOWN for operator reconciliation. Attachments wait for their summary to be acknowledged.
 
@@ -59,13 +59,13 @@ Telegram provides no client idempotency key for sends. The outbox records acknow
 | M4 | GitHub full-history and full frontend assets | Pending; add commit pagination, force-push/rewrite handling, immutable asset bodies, adapter fixtures |
 | M5 | Rich historical evidence context and retrieval | Partial: exact version/diff history and recent general reports exist; broader contextual retrieval and evidence ledger pending |
 | M6 | Broad model analysis and optional additive focus | Implemented; verify model access and assess pilot alert quality with real retained changes |
-| M7 | Telegram and operations | Core output/setup/reconciliation implemented; digests, automatic health alerts, richer operator tooling pending |
+| M7 | Telegram and operations | Output/setup/reconciliation and daily health digests implemented; live scheduled verification and richer operator tooling tracked |
 | M8 | Production pilot | Await owner-controlled runtime credentials; baseline, no-change run, controlled real-change validation, restore drill |
 | M9 | 200–500 protocol qualification | Pending load/soak tests, query/queue profiling, rate-limit tuning, retention policy, and source coverage review |
 
 ## Open requirements, not accepted limitations
 
-The items below map to the release register. GitHub/asset coverage (PROD-02/03), clean baselines and new-page context (PROD-06), polling reconciliation (PROD-07), storage/restore (PROD-05), delivery (PROD-09), and runtime networking (PROD-10) block first production. Historical retrieval, report format, digest, retention and scale remain open under the corresponding SPEC/SCALE gates. Listing an item here does not close it.
+The items below map to the release register. GitHub/asset coverage (PROD-02/03), clean baselines and new-page context (PROD-06), polling reconciliation (PROD-07), storage/restore (PROD-05), delivery (PROD-09), and runtime networking (PROD-10) block first production. Historical retrieval, report format, retention and scale remain open under the corresponding SPEC/SCALE gates. Listing an item here does not close it.
 
 - Source discovery is configured/assistant-assisted. The shipped footprint is not a complete inventory of either starter protocol.
 - HTML extraction preserves visible text, link targets, script identities and embedded JSON, but does not download and semantically inspect all JavaScript/CSS/source-map bodies. Dynamic client-rendered content can therefore be outside current coverage.
@@ -74,10 +74,14 @@ The items below map to the release register. GitHub/asset coverage (PROD-02/03),
 - Shared source cadence does not yet relax when the fastest subscriber is removed. Sitemap removals retain page polling. Retirement/reconciliation policies need implementation.
 - The general model receives recent material general reports as prior inferences, not a complete historical reasoning ledger. Focus cannot enter that context through the automatic path, but operators must also keep neutral profiles free of narrow watch instructions.
 - All evidence is retained initially. Add tested retention/backup policies before volume grows. S3/R2 compatibility and Telegram/OpenAI account access require live credentialed verification.
-- There is no dashboard, Issues integration, daily digest, full review/replay UI, or guaranteed exactly-once Telegram delivery. The CLI exposes source, analysis, and delivery failures.
+- There is no dashboard, Issues integration, full review/replay UI, or guaranteed exactly-once Telegram delivery. The CLI exposes source, analysis, and delivery failures.
 
 ## Validation strategy
 
 Unit tests replay HTTP and Telegram behavior without credentials. Postgres integration tests exercise migrations, baseline → unchanged → repeated changes, failure recovery, concurrent queue claims, expired worker fencing, general/focus independence, crash recovery, and delivery reconciliation. CI runs against a disposable Postgres service and builds/validates the production container.
 
 Production acceptance additionally needs real baselines, provider integration checks, a later changed observation, operational monitoring, and restore validation. A successful CI run is evidence for the implementation's tested behavior, not proof of complete source coverage or production-scale readiness.
+
+## Scheduled pilot and daily reporting
+
+See [SCHEDULE_AND_DIGEST.md](SCHEDULE_AND_DIGEST.md). A UTC day cursor advances atomically with the archived digest report and Telegram outbox rows. Daily reports use a null analysis-job/protocol reference because they summarize all protocols and are not model jobs. Cycles record stage outcomes in Postgres; failures do not prevent unrelated stages from running.

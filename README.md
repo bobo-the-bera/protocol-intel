@@ -9,7 +9,7 @@ Monitor public protocol documentation and web surfaces, preserve exact changes, 
 1. [Connect your Telegram channel](docs/TELEGRAM.md). This can be tested from GitHub without a server, database, or OpenAI key.
 2. [Configure and run the monitor](docs/DEPLOYMENT.md). Choose a persistent Docker host or the supplied GitHub Actions workflow with external Postgres and S3/R2.
 3. Baseline `near` and `hyperlend`. A first observation never produces a change alert or model call.
-4. Close and verify the first-production requirements before enabling the daemon or hourly workflow. `uv run protocol-intel release-check` currently exits unsuccessfully by design.
+4. The proposed docs pilot uses the [15-minute schedule and daily digest](docs/SCHEDULE_AND_DIGEST.md). The owner approved a 72-hour trial with automatic stop; its first cycle sets a persistent deadline. Broader production requirements remain tracked; `uv run protocol-intel release-check` still reports those open requirements.
 
 ## Broad analysis is the default
 
@@ -27,9 +27,10 @@ This prevents a configured thesis from narrowing the pipeline; it does not guara
 - SHA-256 evidence on a persistent local volume or S3-compatible object store. Repeated transitions such as A → B → A → B are all recorded.
 - Fixed-window change clusters, complete diff chunking, schema-validated model responses, cached analysis chunks, archived model inputs and usage, and evidence-linked Markdown reports.
 - Telegram summary plus full Markdown evidence attachment, a durable delivery outbox, and explicit handling of uncertain sends.
+- Daily UTC digests from stored reports, persistent catch-up progress, coverage/failure summaries, and recorded cycle outcomes.
 - Credential-free unit tests, real Postgres integration tests in CI, a non-root container, and operator commands.
 
-The starter configs cover the listed docs and homepages. They are **not a claim of complete NEAR or HyperLend coverage**. Missing GitHub history and frontend asset adapters block the first-production release. Historical context, daily digest, cost controls, retention and scale qualification also remain open in the [release register](docs/RELEASE_REQUIREMENTS.yaml); they are not waived by appearing in a future stage.
+The starter configs cover the listed docs and homepages. They are **not a claim of complete NEAR or HyperLend coverage**. Missing GitHub history and frontend asset adapters block the first-production release. Historical context, cost controls, retention and scale qualification also remain open in the [release register](docs/RELEASE_REQUIREMENTS.yaml); they are not waived by appearing in a future stage.
 
 ## Add another protocol
 
