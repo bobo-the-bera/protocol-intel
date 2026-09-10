@@ -139,6 +139,7 @@ def summary_text(row: dict) -> str:
         lines = [
             f"TEST — BASELINE REVIEW — {row['protocol_id']}",
             "Sampled existing snapshots; not a detected change.",
+            "Interpretations are unverified; incomplete excerpts do not prove a vulnerability.",
             f"Report {row['report_id']}",
             cost_text(preview["cost"]),
             f"Tokens: {usage.get('input_tokens', 'unknown')} input / {usage.get('output_tokens', 'unknown')} output (includes reasoning).",
@@ -146,6 +147,10 @@ def summary_text(row: dict) -> str:
             f"Application archive: {preview['resources']['archive_bytes'] / 2**20:.3f} MiB; storage breakdown and cost scenarios in attachment.",
             "",
         ]
+        if preview.get("recovered_evidence"):
+            lines.insert(
+                2, "Recovered saved response: zero new AI calls. Cost below is the original call."
+            )
         if not result["findings"]:
             lines.extend([result["nonmaterial_summary"], ""])
     for finding in result["findings"]:

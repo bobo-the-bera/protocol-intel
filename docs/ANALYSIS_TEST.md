@@ -15,6 +15,12 @@ For a saved response rejected during validation, use **Actions → Analysis rece
 
 **Re-run jobs on the same run** preserves the run ID and reuses the saved API response. A new **Run workflow** creates a new paid test. A report already acknowledged by Telegram is not automatically sent again on a same-run retry.
 
+### Recover the original saved test without another AI charge
+
+Receipt run **34469790454** identified exact supplied snapshot IDs embedded in evidence sentences in the original response. To recover it with the current code, open **Actions → Recover analysis test → Run workflow**, select **main**, enter original run ID **34414521438**, and choose **near**. This workflow has no OpenAI credential, constructs no model client, and refuses missing or unsubmitted responses. It can extract exact legacy `[snapshot:<64 hex characters>]` references; unknown or malformed citations still fail. The original response and evidence prose remain archived, and normalization is recorded in the report. This verifies reference membership, not the truth of every model interpretation.
+
+Recovery sends the labeled baseline summary and document to Telegram. It reuses the original report identity and delivery records, so acknowledged messages are not resent. Its dollar figure describes the original paid call; recovery makes zero new AI calls. Rerunning the older failed workflow retains its old code, so use this dedicated recovery workflow instead. Live recovery and Telegram delivery remain pending until that run succeeds.
+
 The exact request and raw provider response are archived, and usage is saved before validating the generated findings. An incomplete response or invalid evidence cannot become a successful report. A model timeout or a crash between submission and receipt persistence is deliberately treated as an uncertain outcome: the same run will not submit again. Inspect the run logs and OpenAI usage before requesting a new test. Usage is printed immediately when the provider returns it, including when later report generation fails. A timeout without returned usage cannot be measured locally.
 
 Telegram permission is checked before the paid call. Definite delivery failures retain the report; ambiguous submissions require checking the channel and resolving the outbox status before resending. See [TELEGRAM.md](TELEGRAM.md). Only this test's report is delivered; unrelated pending alerts are not drained.

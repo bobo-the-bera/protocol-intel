@@ -10,7 +10,13 @@ from protocol_intel.analysis import claim_job, queue_clusters
 from protocol_intel.blobs import S3Blobs, blob_key
 from protocol_intel.config import canonical
 from protocol_intel.costs import archive_inventory, model_cost, resource_usage
-from protocol_intel.preview import generate_preview, inspect_preview, prepare_preview
+from protocol_intel.preview import (
+    Assessment,
+    generate_preview,
+    inspect_preview,
+    prepare_preview,
+    validate_preview_evidence,
+)
 from protocol_intel.telegram import deliver_one, summary_text
 
 
@@ -131,6 +137,7 @@ def analyzer_response(status="completed", content=None):
         "status": status,
         "usage": {"input_tokens": 2000, "output_tokens": 500},
         "output": [
+            {"type": "reasoning", "encrypted_content": "ENCRYPTED_REASONING_TEST_SENTINEL"},
             {
                 "type": "message",
                 "content": [
@@ -139,11 +146,133 @@ def analyzer_response(status="completed", content=None):
                         "text": content if content is not None else canonical(result),
                     }
                 ],
-            }
+            },
         ],
     }
     create = AsyncMock(return_value=SimpleNamespace(model_dump_json=lambda: canonical(raw)))
     return SimpleNamespace(client=SimpleNamespace(responses=SimpleNamespace(create=create)))
+
+
+def legacy_assessment(evidence):
+    return Assessment.model_validate(
+        {
+            "findings": [
+                {
+                    "title": "Existing property",
+                    "importance": "HIGH",
+                    "observed_change": "Existing state",
+                    "significance": "Possible implication",
+                    "evidence": evidence,
+                    "uncertainty": "The excerpt is truncated; deployment is unverified",
+                }
+            ],
+            "nonmaterial_summary": "No historical comparison; incomplete sample.",
+        }
+    )
+
+
+def test_legacy_recovery_requires_explicit_opt_in_and_preserves_prose():
+    ref = "snapshot:" + "a" * 64
+    evidence = [
+        f"The snapshots show root-level `security: []` in this excerpt [{ref}]",
+        f"Related context [{ref}]",
+    ]
+    with pytest.raises(ValueError, match="missing snapshot evidence"):
+        validate_preview_evidence(legacy_assessment(evidence), {ref})
+    result = legacy_assessment(evidence)
+    originals = validate_preview_evidence(result, {ref}, recover=True)
+    assert result.findings[0].evidence == [ref]
+    assert originals == [{"finding_index": 0, "evidence": evidence}]
+
+
+@pytest.mark.parametrize(
+    "suffix",
+    [
+        " [snapshot:" + "b" * 64 + "]",
+        " [snapshot:broken]",
+        " snapshot:" + "b" * 64,
+        " [unknown-source]",
+    ],
+)
+def test_recovery_rejects_mixed_unknown_or_malformed_references(suffix):
+    ref = "snapshot:" + "a" * 64
+    with pytest.raises(ValueError, match="missing snapshot evidence"):
+        validate_preview_evidence(legacy_assessment([f"Evidence [{ref}]" + suffix]), {ref}, True)
+
+
+@pytest.mark.postgres
+async def test_saved_legacy_response_recovers_without_api_client(
+    db, blobs, protocol, settings, monkeypatch
+):
+    await baseline(db, blobs, protocol)
+    payload = await prepare_preview(db, blobs, settings, protocol.id)
+    ref = "snapshot:" + protocol.sources[0].identity()
+    payload["sample"]["snapshots"][0]["id"] = ref
+    payload["request"]["input"][1]["content"] = canonical(payload["sample"])
+    monkeypatch.setattr("protocol_intel.preview.prepare_preview", AsyncMock(return_value=payload))
+    evidence = [f"The guide describes this property [{ref}]"]
+    analyzer = analyzer_response(content=legacy_assessment(evidence).model_dump_json())
+    with pytest.raises(ValueError, match="missing snapshot evidence"):
+        await generate_preview(db, blobs, analyzer, settings, protocol.id, "recover")
+    receipt_before = (await db.rows("SELECT * FROM analysis_chunks"))[0]
+    report = await generate_preview(
+        db, blobs, None, settings, protocol.id, "recover", resume_only=True
+    )
+    again = await generate_preview(
+        db, blobs, None, settings, protocol.id, "recover", resume_only=True
+    )
+    assert again == report
+    assert analyzer.client.responses.create.await_count == 1
+    assert (await db.rows("SELECT * FROM analysis_chunks"))[0] == receipt_before
+    assert report["result"]["findings"][0]["evidence"] == [ref]
+    assert report["result"]["_preview"]["recovered_evidence"][0]["evidence"] == evidence
+    document = (await blobs.get(report["blob_hash"])).decode()
+    assert evidence[0] in document
+    assert "No historical comparison; incomplete sample." in document
+    assert "not proof of a deployed vulnerability" in document
+    summary = summary_text({**report, "report_id": report["id"]})
+    assert "zero new AI calls" in summary
+    assert "incomplete excerpts do not prove a vulnerability" in summary
+    assert not report["material"]
+    assert await db.rows("SELECT * FROM outbox") == []
+
+
+@pytest.mark.postgres
+async def test_recovery_missing_or_unsubmitted_job_cannot_buy_analysis(
+    db, blobs, protocol, settings
+):
+    with pytest.raises(ValueError, match="no model call"):
+        await generate_preview(db, blobs, None, settings, protocol.id, "missing", resume_only=True)
+    assert await db.rows("SELECT * FROM jobs") == []
+    await baseline(db, blobs, protocol)
+    await db.execute(
+        "INSERT INTO jobs(id,protocol_id,kind,payload,status) VALUES('baseline-test-prepared',:protocol,'baseline_test','{}','TEST_PREPARED')",
+        protocol=protocol.id,
+    )
+    with pytest.raises(ValueError, match="no model call"):
+        await generate_preview(db, blobs, None, settings, protocol.id, "prepared", resume_only=True)
+    assert (await db.rows("SELECT status FROM jobs"))[0]["status"] == "TEST_PREPARED"
+
+
+def test_recovery_cli_does_not_construct_model_client(monkeypatch, settings):
+    from typer.testing import CliRunner
+
+    from protocol_intel import cli
+
+    monkeypatch.setattr(cli, "configuration", lambda _: (settings, []))
+    monkeypatch.setattr(cli, "Database", lambda _: SimpleNamespace(close=AsyncMock()))
+    model = Mock(side_effect=AssertionError("Recovery must not construct OpenAI"))
+    monkeypatch.setattr(cli, "OpenAIAnalyzer", model)
+    generate = AsyncMock(side_effect=ValueError("No saved response"))
+    monkeypatch.setattr(cli, "generate_preview", generate)
+    result = CliRunner().invoke(
+        cli.app, ["analysis-preview", "test", "--run-id", "missing", "--resume-only"]
+    )
+    assert result.exit_code == 1
+    assert "No saved response" in result.output
+    model.assert_not_called()
+    assert generate.call_args.args[2] is None
+    assert generate.call_args.kwargs["resume_only"] is True
 
 
 @pytest.mark.postgres
@@ -293,6 +422,7 @@ async def test_inspection_exposes_invalid_references_without_approving_or_rechar
     assert protocol.sources[0].identity() in document
     assert "Measured storage" in document
     assert "unverified" in document
+    assert "ENCRYPTED_REASONING_TEST_SENTINEL" not in document
     assert analyzer.client.responses.create.await_count == 1
     assert await db.rows("SELECT * FROM reports") == []
     assert await db.rows("SELECT * FROM outbox") == []
