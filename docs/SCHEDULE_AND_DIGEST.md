@@ -1,6 +1,6 @@
 # Scheduled monitoring and daily Telegram reporting
 
-The owner authorized this scoped docs/homepage pilot on 10 September 2026. The existing eight secrets are sufficient. The recovered NEAR baseline test successfully delivered both summary and document in [run 34471081681](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34471081681); it reused the original response and incurred no new AI call.
+The owner requested this scoped docs/homepage pilot on 10 September 2026. Implementation is tested in PR #7; automatic approval review requires explicit activation approval before its merge. The existing eight secrets are sufficient. The recovered NEAR baseline test successfully delivered both summary and document in [run 34471081681](https://github.com/bobo-the-bera/protocol-intel/actions/runs/34471081681); it reused the original response and incurred no new AI call.
 
 ## Timing and controls
 
@@ -46,4 +46,4 @@ uv run protocol-intel failures
 
 `daily-digest` only queues the next due day and makes no model call or direct Telegram send. `cycle` runs enabled roles and sends queued work when notifications are enabled. Run **Actions → Monitor → Run workflow → main → cycle** for an immediate check; a cycle covers all enabled protocols. Repeated runs resume stored work. Do not rebaseline established sources or rerun the paid Analysis test to activate scheduling.
 
-The first scheduled cycle and live daily digest must be recorded in VALIDATION.md after execution. Database/CI tests establish retry and boundary behavior; they do not themselves prove live scheduling or channel delivery.
+CI run 34504177741 passed 126 tests with zero skips on implementation commit 6e0e2331e3131b08cc4f5d39666dda4f5791abb1. The first scheduled cycle and live daily digest must be recorded in VALIDATION.md after execution. Database/CI tests establish retry and boundary behavior; they do not themselves prove live scheduling or channel delivery.

@@ -9,7 +9,7 @@ Monitor public protocol documentation and web surfaces, preserve exact changes, 
 1. [Connect your Telegram channel](docs/TELEGRAM.md). This can be tested from GitHub without a server, database, or OpenAI key.
 2. [Configure and run the monitor](docs/DEPLOYMENT.md). Choose a persistent Docker host or the supplied GitHub Actions workflow with external Postgres and S3/R2.
 3. Baseline `near` and `hyperlend`. A first observation never produces a change alert or model call.
-4. The owner-authorized docs pilot uses the [15-minute schedule and daily digest](docs/SCHEDULE_AND_DIGEST.md). Broader production requirements remain tracked; `uv run protocol-intel release-check` still reports those open requirements.
+4. The proposed docs pilot uses the [15-minute schedule and daily digest](docs/SCHEDULE_AND_DIGEST.md). Activation approval for PR #7 is pending. Broader production requirements remain tracked; `uv run protocol-intel release-check` still reports those open requirements.
 
 ## Broad analysis is the default
 

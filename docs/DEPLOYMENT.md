@@ -1,6 +1,6 @@
 # First production run
 
-**Current status: the owner authorized the scheduled NEAR/HyperLend docs pilot on 10 September 2026 after verifying baselines, storage and Telegram report delivery.** The Monitor workflow now enables this scoped pilot by default. This authorization does not close the [full production requirements](RELEASE_REQUIREMENTS.yaml): missing repository/asset collectors, backup restoration and other acceptance work remain explicit follow-up work. Read [SCHEDULE_AND_DIGEST.md](SCHEDULE_AND_DIGEST.md) for timing and controls.
+**Current status: scheduled NEAR/HyperLend docs monitoring and daily digests are implemented and tested in PR #7; activation approval is pending.** Merging the proposed Monitor workflow enables this scoped pilot by default. Automatic approval review requires explicit approval for that recurring collection, paid analysis and Telegram delivery. This pilot does not close the [full production requirements](RELEASE_REQUIREMENTS.yaml): missing repository/asset collectors, backup restoration and other acceptance work remain explicit follow-up work. Read [SCHEDULE_AND_DIGEST.md](SCHEDULE_AND_DIGEST.md) for timing and controls.
 
 The repository supplies two runtime options. Use **Docker on a persistent host** for continuous polling. Use **GitHub Actions with external Postgres and S3/R2** for a small scheduled pilot without an always-on application server. Do not run both against different state stores if you expect one alert history.
 
@@ -157,7 +157,7 @@ The per-protocol Monitor workflow remains available:
 
 No OpenAI calls or Telegram posts are made by `baseline`. Limits are explicit; inventories that exceed their configured limits fail instead of silently losing URLs.
 
-### Operate the authorized pilot
+### Operate the pilot after activation approval
 
 The current eight secrets and verified baselines are reused. Scheduled cycles are enabled when `MONITOR_ENABLED` is unset or `true`; explicit `false` overrides are honored. Collection, analysis, notifications and daily digests default on in Actions. Local `.env` role defaults remain off.
 
